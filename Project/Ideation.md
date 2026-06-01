@@ -22,6 +22,10 @@ Title: Multi-Agent Regulatory Signal Intelligence System for Medical Software an
 | **MDCG 2019-16 Rev. 1** | — | Guidance on cybersecurity for medical devices — relevant to AI/ML security controls |
 | **MDCG 2020-7** | — | Guidance on post-market clinical follow-up (PMCF) and surveillance plan templates |
 | **ISO/IEC 42001:2023** | §6.1, §8.4, §9.1, Annex B | AI Management System — risk assessment for AI (§6.1), AI system operation (§8.4), performance evaluation (§9.1), controls for AI lifecycle (Annex B). Basis for our AIMS compliance framework |
+| **IEC 80001-1** | — (acknowledged, out of scope) | IT-network risk management — relevant for networked production deployment of medical-device-connected software. Not in prototype scope. |
+| **ISO/IEC 27001** | — (acknowledged, out of scope) | Information security management — required for production handling of sensitive data. Our prototype uses only public openFDA data. |
+| **IEC 62366-1** | — (partial — dashboard UX only) | Usability engineering for medical devices — basic UX principles applied to QM dashboard; formal usability engineering file is future work. |
+| **GDPR (EU 2016/679)** | — (not triggered) | EU data privacy regulation — no personal data processed in prototype (FDA pre-redacts MAUDE narratives). |
 
 ### ISO 14971:2019 — Risk Management Process Integration
 

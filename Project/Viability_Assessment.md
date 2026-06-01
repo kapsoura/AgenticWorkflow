@@ -315,6 +315,116 @@ Review confirms:
 
 ---
 
+## 7B. Extended QMS Review Feedback (2026-06-01, Round 2)
+
+> Second round of review feedback, expanding standards coverage and clarifying functional expectations per agent.
+
+### 1. Additional Standards to Acknowledge
+
+| Standard | Scope | Current Coverage | Action |
+|----------|-------|-----------------|--------|
+| ISO 13485:2016 | Quality Management Systems | ✅ Already covered (§§4.2.4, 5.6, 7.1, 8.2.1, 8.2.2, 8.5.2, 8.5.3) | None |
+| ISO 14971:2019 | Risk Management | ✅ Full 5×5 matrix in Agent 4 | None |
+| IEC 62304 | Software Life Cycle | ✅ §9 mapped to pipeline | None |
+| IEC 82304-1 | Health Software Safety | ✅ Already referenced | None |
+| **IEC 80001-1** | IT Network Risk Management | ❌ Not referenced | Add as "out of scope for prototype — networked deployment is future work" |
+| **ISO/IEC 27001** | Information Security | ❌ Not referenced | Add data handling section: openFDA data is public, no PII; production deployment would require ISO 27001 controls |
+| **IEC 62366-1** | Usability Engineering | ❌ Not referenced | Add note: dashboard UX follows usability engineering principles; formal IEC 62366-1 file is future work |
+| **GDPR** | Data Privacy (EU) | ❌ Not referenced | Add note: no PII processed (FDA pre-redacts MAUDE narratives); GDPR not triggered for our data |
+
+### 2. Functional Design Expectations per Agent
+
+Review specifies what each agent should do. Mapping against our current design:
+
+| Reviewer Expectation | Our Current Agent | Coverage | Gap / Action |
+|---------------------|-------------------|----------|--------------|
+| **Complaint intake from multiple sources** (customer, service, PMS, publications) | Agent 1 (Extraction) | Partial — we accept text input | Document that the input format is source-agnostic; multi-source ingestion connectors are future work |
+| **Classify as safety vs non-safety** | Agent 1 + Agent 4 | Partial — we have `severity_indicator` but no explicit safety/non-safety flag | Add `is_safety_related: boolean` field to extraction output |
+| **Structured extraction (failure, component, severity, usability, security)** | Agent 1 | Partial — we have failure mode and component | Add `usability_concern` and `security_concern` boolean flags to extraction schema |
+| **Risk assessment per ISO 14971** | Agent 4 | ✅ Full S×P matrix with acceptability zones | None |
+| **Escalate critical cases to Safety Council / PRRC** | Validation gate after Agent 4 | Partial — we have escalation for HIGH risk + no citations | Add explicit `escalation_required` field with PRRC notification flag for UNACCEPTABLE risk |
+| **Regulatory database screening (FDA, EU, etc.)** | Agent 3 (Retrieval) | Partial — FDA only | Document: EU EUDAMED is not yet publicly queryable; FDA MAUDE is our proxy. Add note in report. |
+| **CAPA recommendation referencing previous outcomes** | Agent 4 (merged) | ✅ Precedent basis field already in output | None |
+| **Report assembly with traceability and citations** | Agent 5 | ✅ Already in design | None |
+| **Human expert review and approval before implementation** | QM Review gate in workflow | ✅ Explicitly designed as decision support | None |
+
+### 3. Security, Privacy, Usability — Where We Stand
+
+| Concern | Reviewer Requirement | Our Position |
+|---------|--------------------|--------------|
+| Information security (ISO/IEC 27001) | All data handling compliant | Data is public FDA records, no PII. Production deployment would require ISO/IEC 27001 controls — out of scope for prototype. |
+| Data privacy (GDPR) | EU privacy requirements | No personal data processed. FDA pre-redacts MAUDE narratives. GDPR not triggered. |
+| Usability engineering (IEC 62366-1) | Maximize safe and effective use | Dashboard design will follow basic usability principles (clear labels, error states, confirmation prompts). Formal IEC 62366-1 usability file is future work. |
+
+### 4. Continuous Improvement and Feedback Loop
+
+| Reviewer Requirement | Current Coverage | Gap |
+|---------------------|-----------------|-----|
+| Feed complaint trends into QMS improvement cycle | ✅ Aggregated dashboard for management review | None |
+| Feedback loops for reviewers to refine extraction | Partial — DPO captures preference feedback for reports | Extend to extraction quality: add "reviewer correction" tracking to extraction outputs |
+| CAPA outcomes feedback | ❌ Not in scope | Future work — would require integration with CAPA tracking system |
+
+### 5. Documentation and Auditability — Confirmed
+
+All agent actions, decisions, and outputs are documented per our Observability section:
+- LangSmith traces for every LLM call
+- JSON logs with full trace IDs
+- Signal reports stored with version, timestamp, model info
+- Audit trail satisfies ISO 13485 §4.2.5 and IEC 62304 §9.5
+
+### Schema Additions Required (Consolidated)
+
+Based on both rounds of review, the extraction output schema needs these additional fields:
+
+```json
+{
+  "extraction_output": {
+    // ... existing fields ...
+    "is_safety_related": "boolean",
+    "usability_concern": "boolean",
+    "security_concern": "boolean",
+    "affected_countries": ["string"] | "unknown",
+    "complaint_source": "customer|service|PMS|publication|internal|unknown"
+  },
+  "risk_output": {
+    // ... existing fields ...
+    "escalation_required": "boolean",
+    "prrc_notification_required": "boolean",
+    "fsca_required": "boolean"
+  }
+}
+```
+
+### Updated Action List (Consolidating Both Reviews)
+
+| # | Action | Owner | When | Priority |
+|---|--------|-------|------|----------|
+| 1 | Add `affected_countries` to extraction schema | M3 | Week 1 | Medium |
+| 2 | Add `is_safety_related`, `usability_concern`, `security_concern` flags | M3 | Week 1 | Medium |
+| 3 | Add `complaint_source` field with default value for synthetic data | M3 | Week 1 | Low |
+| 4 | Add `fsca_required`, `escalation_required`, `prrc_notification_required` to risk output | M5 | Week 2 | High |
+| 5 | Document EUDAMED limitation; FDA MAUDE is our regulatory database proxy | M2 | Week 1 | Low |
+| 6 | Add data privacy section: no PII, GDPR not triggered | M6 | Week 4 | Low |
+| 7 | Add security section: ISO/IEC 27001 out of scope; production note in future work | M6 | Week 4 | Low |
+| 8 | Add usability note: basic principles followed; formal IEC 62366-1 file is future work | M6 | Week 4 | Low |
+| 9 | Add note that multi-source ingestion connectors are future work | M6 | Week 4 | Low |
+| 10 | Add reviewer correction tracking for extraction (extends DPO feedback) | M6 | Week 3 | Low |
+
+### What's Explicitly Out of Scope (Document in Report)
+
+To avoid scope creep from review feedback, the following are explicitly future work:
+
+- **IEC 80001-1 networked deployment** — prototype runs locally, not on a hospital IT network
+- **ISO/IEC 27001 information security controls** — production deployment requirement, not prototype
+- **GDPR compliance** — not triggered (no PII), but production deployment would need privacy impact assessment
+- **Formal IEC 62366-1 usability engineering file** — basic UX principles only
+- **EUDAMED integration** — not publicly queryable; FDA MAUDE is the working proxy
+- **Multi-source ingestion connectors** (customer portal, service desk, PMS feeds) — input is text-based for prototype
+- **CAPA outcome tracking integration** — would need access to QMS CAPA system
+- **Automated regulatory body reporting** (MDR/MIR form pre-fill) — downstream of CAPA approval
+
+---
+
 ## 8. Open Questions for Team Discussion
 
 1. Does anyone have access to ISO 14971:2019 or IEC 62304 through employer/university?

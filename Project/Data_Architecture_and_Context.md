@@ -326,6 +326,15 @@ CREATE TABLE events (
     domain TEXT,  -- 'imaging' or 'molecular_dx'
     modality TEXT,  -- 'MRI', 'CT', 'Ultrasound', 'X-ray', 'Hematology', 'PCR', 'MolDx'
     software_related BOOLEAN,
+    -- QMS review (Round 2) extraction fields:
+    is_safety_related BOOLEAN,            -- Agent 1 safety vs non-safety classification
+    usability_concern BOOLEAN,            -- IEC 62366-1 usability-related flag
+    security_concern BOOLEAN,             -- ISO/IEC 27001 / cybersecurity flag
+    affected_countries TEXT,              -- JSON array of ISO 3166-1 codes or 'unknown'
+    complaint_source TEXT,                -- 'customer' | 'service' | 'PMS' | 'publication' | 'internal' | 'unknown'
+    qms_complaint_category TEXT,          -- ISO 13485 §8.2.2 code: SW-FUNC, SW-ALGO, SW-UI, SW-DATA, SW-CYBER, HW-MECH, HW-ELEC, IMG-QUAL, IMG-PROC, PERF-ACC, SAFE-PAT, SAFE-USR, DOC-LABEL
+    severity_indicator TEXT,              -- Coded scale: S1_negligible..S5_catastrophic
+    extraction_confidence REAL,           -- Agent 1 self-reported confidence [0,1]
     cluster_id INTEGER,
     embedding_id TEXT,  -- Reference to ChromaDB
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -387,10 +396,16 @@ CREATE TABLE signal_reports (
     extraction_json TEXT,  -- Agent 1 output
     cluster_match INTEGER REFERENCES clusters(id),
     similar_events TEXT,  -- JSON array of report_numbers
-    risk_assessment TEXT,  -- Agent 4 output JSON
-    capa_recommendation TEXT,  -- Agent 5 output JSON
-    final_report TEXT,  -- Agent 6 output (markdown)
-    status TEXT DEFAULT 'draft',  -- 'draft', 'reviewed', 'approved'
+    risk_assessment TEXT,  -- Agent 4 output JSON (includes iso14971_assessment)
+    capa_recommendation TEXT,  -- Agent 4 CAPA block JSON
+    final_report TEXT,  -- Agent 5 output (markdown)
+    -- QMS review (Round 2) escalation flags (mirrored from Agent 4 escalation_flags block):
+    risk_level TEXT,                      -- 'ACCEPTABLE' | 'ALARP' | 'UNACCEPTABLE'
+    escalation_required BOOLEAN,          -- true if risk_level in (ALARP, UNACCEPTABLE)
+    prrc_notification_required BOOLEAN,   -- true if risk_level = UNACCEPTABLE (EU MDR Art. 15)
+    fsca_required BOOLEAN,                -- Field Safety Corrective Action trigger
+    status TEXT DEFAULT 'draft',  -- 'draft', 'reviewed', 'approved', 'rejected', 'escalated'
+    reviewer_correction_json TEXT,        -- Captures QM reviewer edits to extraction (feeds DPO pipeline)
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TIMESTAMP
 );
@@ -399,10 +414,15 @@ CREATE TABLE signal_reports (
 CREATE INDEX idx_events_product_code ON events(product_code);
 CREATE INDEX idx_events_manufacturer ON events(manufacturer_normalized);
 CREATE INDEX idx_events_cluster ON events(cluster_id);
+CREATE INDEX idx_events_safety ON events(is_safety_related);
+CREATE INDEX idx_events_qms_category ON events(qms_complaint_category);
 CREATE INDEX idx_recalls_product_code ON recalls(product_code);
 CREATE INDEX idx_recalls_root_cause ON recalls(root_cause);
 CREATE INDEX idx_risk_stats ON risk_statistics(product_code, problem_code);
+CREATE INDEX idx_signal_escalation ON signal_reports(escalation_required, risk_level);
 ```
+
+> **Schema sync note**: The new event columns (`is_safety_related`, `usability_concern`, `security_concern`, `affected_countries`, `complaint_source`, `qms_complaint_category`, `severity_indicator`, `extraction_confidence`) and `signal_reports` escalation columns (`risk_level`, `escalation_required`, `prrc_notification_required`, `fsca_required`, `reviewer_correction_json`) mirror the JSON contracts in [System_Design.md](System_Design.md) Agent 1 and Agent 4 outputs, and incorporate QMS review feedback documented in [Viability_Assessment.md](Viability_Assessment.md) §7B. For backfill of pre-existing rows, these columns default to NULL; Agent 1 populates them on new ingestion.
 
 #### ChromaDB: Collections
 

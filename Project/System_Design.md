@@ -123,6 +123,27 @@
 | FDA 21 CFR 820 | §820.90 | Agent 4 (CAPA) | Corrective and preventive action procedures |
 | FDA 21 CFR 820 | §820.198 | Agent 1 + Agent 5 | Complaint handling and record requirements |
 | EU MDR 2017/745 | Art. 83 | Similarity Module | Trend reporting for periodic safety update reports |
+| IEC 80001-1 | — | Out of scope | IT-network risk management — relevant only for networked production deployment |
+| ISO/IEC 27001 | — | Out of scope | Information security — applies to production deployment; prototype uses only public openFDA data |
+| IEC 62366-1 | — | Partial (dashboard UX) | Usability engineering — basic UX principles for QM dashboard; formal usability file is future work |
+| GDPR | — | Not triggered | No personal data processed (FDA pre-redacts MAUDE narratives) |
+
+> **Note on out-of-scope standards**: These are acknowledged per QMS review feedback (Viability §7B) but explicitly excluded from prototype scope. Production deployment would require full controls. This is documented in the "Out of Scope" section below.
+
+### Explicitly Out of Scope (Future Work)
+
+To prevent scope creep, the following are deferred to future work and clearly noted in the final report:
+
+| Item | Reason |
+|------|--------|
+| IEC 80001-1 networked deployment | Prototype runs locally, not on hospital IT network |
+| Full ISO/IEC 27001 controls | Production deployment requirement, not prototype |
+| GDPR privacy impact assessment | Not triggered (no PII); needed only for production with EU data flows |
+| Formal IEC 62366-1 usability engineering file | Basic UX principles applied; full file out of scope |
+| EUDAMED integration | EU database not yet publicly queryable; FDA MAUDE is working proxy |
+| Multi-source ingestion connectors (customer portal, service desk, PMS feed) | Input is text-based for prototype |
+| CAPA outcome tracking integration | Would require live QMS CAPA system access |
+| Automated regulatory body reporting (MDR/MIR form pre-fill) | Downstream of QM approval — out of scope |
 
 ### IEC 62304 Software Safety Classification of Our System
 
@@ -247,15 +268,23 @@ flowchart TD
   "component": "image reconstruction pipeline",
   "failure_mode": "image artifact during cardiac sequence",
   "symptom": "banding artifact visible in reconstructed images",
-  "severity_indicator": "diagnostic quality compromised",
+  "severity_indicator": "S3_serious",
   "manufacturer": "Philips",
   "device_model": "Achieva 1.5T dStream",
   "patient_impact": "repeat scan required (radiation: N/A for MRI)",
   "discovery_phase": "in-use",
   "software_related": true,
+  "is_safety_related": true,
+  "usability_concern": false,
+  "security_concern": false,
+  "affected_countries": ["US", "DE", "unknown"],
+  "complaint_source": "customer",
+  "qms_complaint_category": "IMG-QUAL",
   "confidence": 0.82
 }
 ```
+
+> **Schema rationale**: `is_safety_related`, `usability_concern`, `security_concern` flags address QMS review feedback (Viability §7B). `affected_countries` supports adverse event reporting jurisdiction triage. `complaint_source` enables future multi-source ingestion. `qms_complaint_category` maps to ISO 13485 §8.2.2 categories defined in Ideation.md.
 
 **Techniques**: Chain-of-Thought extraction, structured output, DSPy optimization, self-reflection loop
 
@@ -362,9 +391,17 @@ Manufacturer ─── also_makes ──→ Device (cross-product linking)
     "timeline": "Investigation: 2 weeks. Patch: 4 weeks. Verification: 90 days",
     "precedent_basis": "Philips recall Z-xxxx-2023: 'Software update to correct image reconstruction'",
     "iso13485_clause": "§8.5.2 (corrective) + §8.5.3 (preventive)"
+  },
+  "escalation_flags": {
+    "escalation_required": true,
+    "prrc_notification_required": true,
+    "fsca_required": false,
+    "rationale": "Risk level UNACCEPTABLE → escalation + PRRC notification triggered automatically. FSCA not yet required pending confirmed root cause from investigation."
   }
 }
 ```
+
+> **Escalation logic** (per Viability §7B): `escalation_required = true` whenever `risk_level ∈ {ALARP, UNACCEPTABLE}`. `prrc_notification_required = true` for UNACCEPTABLE risk only. `fsca_required = true` only after root cause is confirmed AND risk = UNACCEPTABLE AND devices are in active distribution.
 
 **Techniques**: Chain-of-Thought reasoning through ISO 14971 methodology, evidence-grounded generation, constitutional guardrails (refuse HIGH/UNACCEPTABLE risk without evidence citations)
 
@@ -417,24 +454,24 @@ The 1,076 software-design recalls provide real-world CAPA examples:
 
 ### Tier 1: Core (MUST implement — Week 1-2)
 
-| # | Technique | Agent | Implementation |
+| # | Technique | Component | Implementation |
 |---|---|---|---|
 | 1 | RAG (Vector + Semantic Retrieval) | Agent 3 | ChromaDB over 3,299 recalls + events |
 | 2 | Chain-of-Thought Extraction | Agent 1 | Structured prompting with reasoning steps |
-| 3 | Sentence-Transformer Embeddings | Agent 2 | all-MiniLM-L6-v2, embed all narratives |
-| 4 | HDBSCAN + UMAP Clustering | Agent 2 | Cluster by failure mode, visualize |
-| 5 | ReAct Pattern | Agent 3 | Iterative evidence retrieval |
-| 6 | Self-Reflection / Critique-Revise | Agent 4, 6 | Two-pass generation with self-check |
+| 3 | Sentence-Transformer Embeddings | Similarity Module | all-MiniLM-L6-v2, embed all narratives |
+| 4 | HDBSCAN + UMAP Clustering | Similarity Module | Cluster by failure mode, visualize |
+| 5 | ReAct Pattern | Agent 3 | Iterative evidence retrieval (upgrade path only if single-pass underperforms) |
+| 6 | Self-Reflection / Critique-Revise | Agent 4, Agent 5 | Two-pass generation with self-check |
 
 ### Tier 2: Extended (SHOULD implement — Week 2-3)
 
-| # | Technique | Agent | Effort |
+| # | Technique | Component | Effort |
 |---|---|---|---|
 | 7 | DSPy Prompt Optimization | Agent 1 | 2-3 days with 10 labeled examples |
-| 8 | DPO Alignment | Agent 5, 6 | Needs 50+ preference pairs (from team) |
+| 8 | DPO Alignment | Agent 5 | Needs 50+ preference pairs (from team) |
 | 9 | Graph RAG | Agent 3 | Build knowledge graph from recalls |
 | 10 | LLM-as-Judge Evaluation | Eval | Calibrate against human scores |
-| 11 | Temporal Anomaly Detection | Agent 2 | Cluster growth rate scoring |
+| 11 | Temporal Anomaly Detection | Similarity Module | Cluster growth rate scoring |
 | 12 | Constrained Decoding / JSON Schema | Agent 1, 4 | Use structured output / tool calling |
 | 13 | MCP Tool Server (wrap openFDA API) | Agent 3 | Demonstrates interoperability per lecture |
 
