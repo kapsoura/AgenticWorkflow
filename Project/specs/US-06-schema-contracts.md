@@ -23,10 +23,11 @@ The pipeline communicates via **message passing** with typed JSON (`System_Desig
 - **Output**: `schemas.py` exposing `ExtractionOutput`, `SimilarityOutput`, `RetrievalOutput`, `RiskCapaOutput`, `ReportOutput`, plus `mock_<x>()` factories. Field definitions per `System_Design.md` (note: `severity_indicator` uses S-codes e.g. `S3_serious`; risk output is the merged `iso14971_assessment` + `evidence_basis` + `capa_recommendation` + `escalation_flags`).
 
 ## Acceptance Criteria
-- [ ] Given each component output, when validated, then required fields (e.g. extraction `confidence`, `qms_complaint_category`; risk `risk_level ∈ {ACCEPTABLE,ALARP,UNACCEPTABLE}`) are enforced and bad payloads raise a clear error.
+- [ ] Given each component output, when validated, then required fields are enforced and bad payloads raise a clear error. Specifically `ExtractionOutput` requires: `modality`, `component`, `failure_mode`, `severity_indicator` (S1–S5 code), `software_related`, `is_safety_related`, `usability_concern`, `security_concern`, `affected_countries`, `complaint_source`, `qms_complaint_category` (13-code ISO 13485 §8.2.2 enum), `confidence`.
+- [ ] Given `RiskCapaOutput`, when validated, then `risk_level ∈ {ACCEPTABLE, ALARP, UNACCEPTABLE}` (ISO 14971 5×5 matrix) is enforced — "HIGH"/"MEDIUM"/"LOW" are NOT valid values.
 - [ ] Given a downstream component under test, when it imports `mock_extraction()` etc., then it can run standalone without upstream components.
 - [ ] Given the schema is frozen (end Week 1), then any later change requires team sign-off and a version bump comment.
-- [ ] Given `escalation_flags`, then the model encodes the rule constraints (e.g. `prrc_notification_required` only valid `true` when `risk_level == UNACCEPTABLE`).
+- [ ] Given `escalation_flags`, then the model encodes the rule constraints: `escalation_required` true iff `risk_level ∈ {ALARP, UNACCEPTABLE}`; `prrc_notification_required` true iff `risk_level == UNACCEPTABLE`; `fsca_required` true iff (confirmed_root_cause AND UNACCEPTABLE AND active_distribution).
 
 ## Technical Approach
 1. Pydantic v2 models; enums for modality, severity S1–S5, risk level, trend flag.

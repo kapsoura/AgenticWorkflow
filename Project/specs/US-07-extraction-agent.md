@@ -25,11 +25,12 @@ First pipeline stage. `System_Design.md` §Agent 1 defines the output schema, in
 - **Output**: `ExtractionOutput` (US-06) — fields per `System_Design.md` Agent 1 schema. Prompt-injection rule: narrative wrapped in `<user_narrative>…</user_narrative>`.
 
 ## Acceptance Criteria
-- [ ] Given a MAUDE-style narrative, when extracted, then `modality`, `failure_mode`, `severity_indicator` (S1–S5 code), `software_related`, and `qms_complaint_category` are populated and schema-valid.
+- [ ] Given a MAUDE-style narrative, when extracted, then `modality`, `failure_mode`, `severity_indicator` (S1–S5 code), `software_related`, `qms_complaint_category`, `is_safety_related`, `usability_concern`, `security_concern`, `affected_countries` (ISO 3166-1 codes or `unknown`), and `complaint_source` are populated and schema-valid per [US-06](US-06-schema-contracts.md).
 - [ ] Given the gold benchmark, when evaluated, then field-level **F1 > 0.80** (target; baseline measured first).
 - [ ] Given an ambiguous/short narrative, then `confidence < 0.5` is returned (so Gate 1 can flag it) rather than a fabricated high-confidence guess.
 - [ ] Given a narrative containing injected instructions ("ignore previous instructions…"), then the agent ignores them (delimiter + system-prompt defense) and extracts normally.
 - [ ] Given a first-pass extraction, when self-reflection runs once, then obvious schema/consistency errors are corrected before return.
+- [ ] Given a narrative with no jurisdictional info, then `affected_countries = ["unknown"]` and `complaint_source = "unknown"` rather than fabricated values.
 
 ## Technical Approach
 1. **Baseline (Week 1)**: single LLM call with schema in prompt → measure F1. This feeds ablation #5.

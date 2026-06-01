@@ -29,6 +29,7 @@ As a **data engineer on the team**, I want a reproducible pipeline that download
 - [ ] Given duplicate initial+followup MAUDE reports, when loading, then rows are deduplicated by `report_number` (latest kept) and the dedupe count is logged.
 - [ ] Given a 429/timeout, when fetching, then the script retries with backoff (existing `fetch_json`) and never silently drops a batch.
 - [ ] Given the load finishes, then every event row has `product_code`, `domain` (imaging|molecular_dx), `modality`, and `narrative` populated (narrative nullable but flagged).
+- [ ] Given the schema in `Data_Architecture_and_Context.md` §4, then the `events` table physically contains the QMS-review columns (`is_safety_related`, `usability_concern`, `security_concern`, `affected_countries`, `complaint_source`, `qms_complaint_category`, `severity_indicator`, `extraction_confidence`) and the `signal_reports` table contains the escalation columns (`risk_level`, `escalation_required`, `prrc_notification_required`, `fsca_required`, `reviewer_correction_json`). These are NULL on ingest — Agent 1 / Agent 4 populate them at runtime.
 
 ## Technical Approach
 1. Reuse/extend `fetch_json` retry logic; add per-code date-range chunking for LLZ/GKZ.

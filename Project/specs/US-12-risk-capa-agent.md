@@ -17,7 +17,7 @@ As a **Quality Manager**, I want a draft ISO 14971 risk assessment and a CAPA re
 `System_Design.md` §Agent 4 — the regulatory core. Encodes the **ISO 14971 severity (S1–S5), probability (P1–P5 calibrated to dataset counts), and 5×5 acceptability matrix** (ACCEPTABLE/ALARP/UNACCEPTABLE), IEC 62304 classification, and escalation flags (PRRC/FSCA). Risk and CAPA are one call by design.
 
 ## Scope
-- **In**: CoT reasoning through ISO 14971 methodology; evidence-grounded risk estimation; CAPA generation from recall precedents; escalation flag logic; constitutional guardrail (refuse HIGH/UNACCEPTABLE without citations); self-reflection.
+- **In**: CoT reasoning through ISO 14971 methodology; evidence-grounded risk estimation; CAPA generation from recall precedents; escalation flag logic; constitutional guardrail (refuse `ALARP`/`UNACCEPTABLE` without citations); self-reflection.
 - **Out**: report formatting (US-13), DPO alignment (US-17), residual-risk acceptability decision (human, per ISO 14971 §7.3).
 
 ## Inputs / Outputs
@@ -27,7 +27,7 @@ As a **Quality Manager**, I want a draft ISO 14971 risk assessment and a CAPA re
 ## Acceptance Criteria
 - [ ] Given evidence with N similar events, when estimating probability, then the P-level follows the dataset-calibrated bands (e.g. 20–200 events → P4 Occasional).
 - [ ] Given severity × probability, when evaluating, then `risk_level` matches the §7.5 acceptability matrix exactly.
-- [ ] Given `risk_level ∈ {HIGH/UNACCEPTABLE}` with **zero** `evidence_basis` citations, then the agent refuses / forces `uncertainty` rather than asserting the level (guardrail).
+- [ ] Given `risk_level ∈ {ALARP, UNACCEPTABLE}` with **zero** `evidence_basis` citations, then the agent refuses / forces `uncertainty` rather than asserting the level (constitutional guardrail). Note: `HIGH`/`MEDIUM`/`LOW` are NOT valid risk levels — only `ACCEPTABLE`/`ALARP`/`UNACCEPTABLE` per ISO 14971 5×5 matrix.
 - [ ] Given escalation logic, then `escalation_required` iff risk ∈ {ALARP, UNACCEPTABLE}; `prrc_notification_required` iff UNACCEPTABLE; `fsca_required` only iff confirmed-root-cause flag AND UNACCEPTABLE AND active distribution.
 - [ ] Given recall precedents in evidence, then `capa_recommendation.precedent_basis` cites a real recall id (verified against DB).
 - [ ] Given the gold benchmark, then risk + CAPA expert rubric **> 3.0/5** (target).
@@ -43,7 +43,7 @@ As a **Quality Manager**, I want a draft ISO 14971 risk assessment and a CAPA re
 Blocked by: US-06, US-07, US-11 (and US-09 for cluster context). Blocks: US-13, US-14.
 
 ## Test Plan
-- Unit: matrix consistency (S3×P4 → UNACCEPTABLE); escalation-flag truth table; guardrail rejects uncited HIGH risk.
+- Unit: matrix consistency (S3×P4 → UNACCEPTABLE); escalation-flag truth table; guardrail rejects uncited ALARP/UNACCEPTABLE risk; rejects any output where `risk_level` is `HIGH`/`MEDIUM`/`LOW`.
 - Eval: rubric scoring on gold; citation-coverage rate.
 
 ## Definition of Done
