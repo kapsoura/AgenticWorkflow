@@ -246,10 +246,81 @@ Even if we hit significant blockers, the following is achievable with reduced sc
 
 ---
 
-## 7. Open Questions for Team Discussion
+## 7. QMS Process Review Feedback (2026-06-01)
+
+> External review of project alignment with Quality Management System processes.
+
+### Verdict: Well-positioned for QMS integration
+
+### Key Requirements from Review
+
+#### 1. Standards and Regulatory Alignment
+
+| Standard | Requirement | Current Coverage | Action Needed |
+|----------|------------|-----------------|---------------|
+| EN 62304/A1:2015 | Medical device software lifecycle | §9 mapped to pipeline | None — already covered |
+| EN ISO 15223-1:2021 | Labelling symbols | Not referenced | Low priority — labelling is not in scope for signal detection |
+| EN 62366-1:2015 | Usability engineering | Not referenced | Consider adding usability of the QM dashboard as a requirement |
+| ISO 14971 | Risk management methodology | Full 5×5 matrix encoded in Agent 4 | None — already covered |
+
+#### 2. Complaint Management and Reporting — Gaps Identified
+
+The review flags that our pipeline should also support:
+
+| Requirement | Current Status | Priority | How to Address |
+|-------------|---------------|----------|----------------|
+| Determine affected countries for adverse event reporting | ❌ Not in scope | Medium | Add `affected_countries` field to extraction schema — derivable from manufacturer + distribution data |
+| Reporting to regulatory bodies (FDA, BfArM, Notified Body) | ❌ Not automated | Low | Out of scope for prototype — note as "future work: automated MDR/MIR form pre-fill" |
+| Field Safety Corrective Actions (FSCA) | Partially covered by CAPA output | Medium | Add `fsca_required: boolean` flag to risk output when risk = UNACCEPTABLE |
+| Customer Safety Advisory Notices (CSAN) | ❌ Not in scope | Low | Future work — downstream of CAPA approval |
+| Traceability per complaint and corrective action | ✅ Covered | — | Traceability JSON already includes full audit trail |
+
+#### 3. Post-Market Surveillance Integration
+
+| Requirement | Current Status | Action |
+|-------------|---------------|--------|
+| PMCF (Post-Market Clinical Follow-up) | Not directly addressed | Add note: our signal reports feed into PMCF activities as evidence source |
+| PSUR (Periodic Safety Update Report) | Partially covered by trend data | Similarity Module trend output maps to PSUR trend section |
+| Public database screening | ✅ Core function | Agent 3 retrieval from MAUDE + recalls satisfies this |
+
+#### 4. Evaluation and Documentation
+
+Review confirms our evaluation strategy is QMS-compatible:
+- Extraction F1 → scientific evaluation evidence
+- Retrieval Precision@5 → evidence of component validation
+- Expert rubric → qualification evidence
+- Ablation studies → continuous improvement documentation
+
+#### 5. Output and Traceability
+
+Review confirms:
+- Signal report format must meet QMS documentation standards → ✅ Agent 5 produces controlled document format
+- All outputs must be traceable and auditable → ✅ Traceability JSON with full audit trail
+- Must support management review → ✅ Aggregated metrics planned for dashboard
+
+### Actions to Incorporate from Review
+
+| # | Action | Owner | When | Impact on Design |
+|---|--------|-------|------|-----------------|
+| 1 | Add `affected_countries` to extraction output schema | M3 | Week 1 | Minor schema addition |
+| 2 | Add `fsca_required` boolean to risk output | M5 | Week 2 | Add logic: if risk = UNACCEPTABLE → flag FSCA |
+| 3 | Add note in report that signal outputs feed PMCF/PSUR | M3 | Week 3 | Report template addition |
+| 4 | Reference EN 62304/A1:2015 explicitly (not just IEC 62304) | All | Week 1 | Terminology update in docs |
+| 5 | Document that regulatory body reporting (MDR/MIR form pre-fill) is future work | M6 | Week 4 | Report "future work" section |
+
+### Standards Not Yet Referenced (from review)
+
+- **EN ISO 15223-1:2021** — Medical device labelling symbols. Not directly relevant to our signal detection pipeline, but good to acknowledge awareness in the report.
+- **EN 62366-1:2015** — Usability engineering. Relevant if we discuss the QM dashboard UX, but not core to the AI pipeline.
+
+---
+
+## 8. Open Questions for Team Discussion
 
 1. Does anyone have access to ISO 14971:2019 or IEC 62304 through employer/university?
 2. Should we scope down to 4 product codes (MRI + CT only) if Week 2 progress is slow?
 3. Who will generate the 200 synthetic complaints — M1 alone or paired with M3?
 4. Do we target a conference paper (AMIA, EMBC, or AAAI health track) or just the MTech report?
 5. Can we get 30 minutes of QM expert time (even informal) to validate our complaint categories?
+6. Should we add FSCA/CSAN logic to Agent 4, or document it as future work?
+7. Do we reference EN-prefixed standards (European harmonized) or ISO/IEC-prefixed (international)? Both refer to the same content.
