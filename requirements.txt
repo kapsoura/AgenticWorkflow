@@ -1,0 +1,16 @@
+# Common baseline dependencies for AI/ML Python projects
+# Install with: <env-python> -m pip install -r requirements.txt
+
+numpy>=1.26,<3
+pandas>=2.2,<3
+matplotlib>=3.8,<4
+scikit-learn>=1.5,<2
+jupyterlab>=4.2,<5
+ipykernel>=6.29,<7
+pytest>=8.2,<9
+ruff>=0.6,<1
+black>=24.8,<26
+mypy>=1.11,<2
+torch>=2.4,<3
+torchvision>=0.19,<1
+torchaudio>=2.4,<3
