@@ -1,7 +1,185 @@
 
 Title: Multi-Agent Regulatory Signal Intelligence System for Medical Software and SaMD Quality Teams
 
-> **🎯 FOCUSED SYSTEM DESIGN**: See [System_Design.md](System_Design.md) for the concrete workflow automation, target product (Infusion Pumps), demo scenario, 4-week build plan, and per-agent technical details. This Ideation document provides background research and technique catalog.
+> **🎯 FOCUSED SYSTEM DESIGN**: See [System_Design.md](System_Design.md) for the concrete workflow automation, target domain (Medical Imaging & Molecular Diagnostics), demo scenario, 4-week build plan, and per-agent technical details. This Ideation document provides background research, technique catalog, and QMS/regulatory alignment rationale.
+
+---
+
+## QMS and Regulatory Standards Alignment
+
+> This section ensures the system design is grounded in real-world Quality Management System processes and regulatory requirements. Based on review against the D&A OneQMS framework.
+
+### Governing Standards
+
+| Standard | Key Clauses Used | Relevance to Our System |
+|----------|-----------------|------------------------|
+| **ISO 13485:2016** | §4.2.4, §5.6, §7.1, §8.2.1, §8.2.2, §8.5.2, §8.5.3 | Quality management for medical devices — defines documentation (§4.2.4), management review data (§5.6), product realization planning (§7.1), post-market surveillance (§8.2.1), complaint handling (§8.2.2), corrective action (§8.5.2), and preventive action (§8.5.3) requirements |
+| **ISO 14971:2019** | §7.3, §7.4, §7.5, §7.6, §10, Annex C, Annex D | Risk management — Agent 4 implements hazard identification (§7.3), risk estimation (§7.4) using severity×probability matrix (Annex D), risk evaluation (§7.5), risk control (§7.6), and production/post-production information analysis (§10) |
+| **IEC 62304:2006+A1:2015** | §5, §6, §7, §8, §9 | Software lifecycle — our system classified as Class B per §4.3. Problem resolution process (§9) maps directly to our pipeline: prepare reports (§9.1), investigate (§9.2), advise parties (§9.3), change control (§9.4), maintain records (§9.5), trend analysis (§9.6), verify resolution (§9.7) |
+| **IEC 82304-1:2016** | §6, §7, §8 | Health software product safety — requirements for software products not part of a medical device, relevant to standalone QMS tools |
+| **FDA 21 CFR Part 820** | §820.90, §820.198 | Quality System Regulation — CAPA procedures (§820.90), complaint handling and record requirements (§820.198) |
+| **EU MDR 2017/745** | Art. 83, Art. 87, Art. 88, Art. 89 | Post-market surveillance system (Art. 83), trend reporting (Art. 83(3)), periodic safety update reports (Art. 86), vigilance reporting of serious incidents (Art. 87) |
+| **MDCG 2019-16 Rev. 1** | — | Guidance on cybersecurity for medical devices — relevant to AI/ML security controls |
+| **MDCG 2020-7** | — | Guidance on post-market clinical follow-up (PMCF) and surveillance plan templates |
+| **ISO/IEC 42001:2023** | §6.1, §8.4, §9.1, Annex B | AI Management System — risk assessment for AI (§6.1), AI system operation (§8.4), performance evaluation (§9.1), controls for AI lifecycle (Annex B). Basis for our AIMS compliance framework |
+
+### ISO 14971:2019 — Risk Management Process Integration
+
+Our pipeline implements the ISO 14971 process as follows:
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ ISO 14971 Risk Management Process → Pipeline Mapping               │
+├────────────────────────────────────────────────────────────────────┤
+│ §5 Risk Analysis                                                   │
+│   └─ §5.4 Hazard identification        → Agent 4 (Annex C lookup) │
+│   └─ §5.5 Risk estimation              → Agent 4 (S×P matrix)     │
+│                                                                    │
+│ §6 Risk Evaluation                                                 │
+│   └─ §6 Risk acceptability criteria     → Agent 4 (3-zone matrix) │
+│                                                                    │
+│ §7 Risk Control                                                    │
+│   └─ §7.1 Risk control option analysis  → Agent 4 CAPA output     │
+│   └─ §7.2 Implementation               → QM responsibility        │
+│   └─ §7.3 Residual risk evaluation      → Not automated (human)   │
+│   └─ §7.4 Benefit-risk analysis         → Agent 4 flags when req'd│
+│                                                                    │
+│ §8 Evaluation of Overall Residual Risk  → Out of scope (human)    │
+│                                                                    │
+│ §9 Risk Management Review               → QRB with our report     │
+│                                                                    │
+│ §10 Production & Post-Production        → Full pipeline (PMS)     │
+│   └─ Collect information                → Agent 3 + Similarity    │
+│   └─ Review information                 → Agent 4 analysis         │
+│   └─ Determine if residual risk changed → Agent 4 risk level       │
+│   └─ Take action                        → CAPA recommendation      │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Key design principle**: The system provides risk analysis support (§5-§6) but does NOT automate risk control decisions (§7.2, §7.3, §8). These require human judgment per ISO 14971 §3.18 (residual risk acceptability is a management decision).
+
+### IEC 62304 — Software Problem Resolution (§9) Mapping
+
+Our pipeline directly implements the IEC 62304 §9 software problem resolution process:
+
+| IEC 62304 Step | Clause | Implementation | Evidence Generated |
+|----------------|--------|----------------|--------------------|
+| Prepare problem reports | §9.1 | Agent 1 extracts structured fields from complaint narrative | `extraction_output` JSON |
+| Investigate problem | §9.2 | Agent 3 retrieves comparable FDA events; Agent 4 analyzes root cause | `retrieval_output` + `risk_output` |
+| Advise relevant parties | §9.3 | Report Assembly creates QRB-ready document; system notifies QM | Signal report document |
+| Use change control process | §9.4 | CAPA output includes change control reference | `capa_output.corrective_action` |
+| Maintain records | §9.5 | Full trace in observability layer (LangSmith + JSON logs) | Audit trail |
+| Analyze problems for trends | §9.6 | Similarity Module temporal anomaly detection | `similarity_output.trend_flag` |
+| Verify software problem resolution | §9.7 | CAPA output includes verification method + effectiveness criteria | `capa_output.verification_method` |
+| Test documentation | §9.8 | Linked to CAPA verification protocol | Referenced in report |
+
+### ISO 13485 — Complaint Handling (§8.2.2) Category Mapping
+
+Agent 1's extraction maps complaints to QMS-defined categories per ISO 13485 §8.2.2:
+
+| QMS Complaint Category Code | Definition | Mapped From |
+|-----------------------------|-----------|-------------|
+| `SW-FUNC` | Software functional failure | "software malfunction", "application error", "system crash" |
+| `SW-ALGO` | Algorithm/calculation error | "incorrect results", "wrong values", "calculation error" |
+| `SW-UI` | User interface issue | "display error", "UI freeze", "incorrect labeling" |
+| `SW-DATA` | Data integrity/loss | "data corruption", "missing data", "transfer failure" |
+| `SW-CYBER` | Cybersecurity concern | "unauthorized access", "vulnerability", "breach" |
+| `HW-MECH` | Hardware mechanical failure | "broken part", "wear", "assembly defect" |
+| `HW-ELEC` | Hardware electrical failure | "short circuit", "power failure", "connector issue" |
+| `IMG-QUAL` | Image quality degradation | "artifact", "noise", "poor resolution", "distortion" |
+| `IMG-PROC` | Image processing error | "reconstruction error", "registration failure" |
+| `PERF-ACC` | Performance/accuracy issue | "false positive", "false negative", "sensitivity drift" |
+| `SAFE-PAT` | Patient safety concern | "injury", "adverse event", "harm" |
+| `SAFE-USR` | User/operator safety concern | "radiation exposure", "electrical shock" |
+| `DOC-LABEL` | Labeling/documentation issue | "IFU error", "incorrect instructions", "missing warnings" |
+
+These categories enable:
+- Consistent trending per §8.2.1 (are `IMG-QUAL` complaints increasing across MRI products?)
+- Management review input per §5.6 (complaint distribution by category)
+- Regulatory reporting triggers (§8.2.3 — when `SAFE-PAT` events meet reporting criteria)
+
+### AI Management System (AIMS) Compliance
+
+Since the organization operates an AI Management System, our pipeline must:
+
+1. **Scientific evaluation**: Validate AI performance on domain-specific benchmarks (our 50-example gold set + ablation studies)
+2. **Qualification of AI components**: Document each LLM/model used (GPT-4.1, sentence-transformers) with version, intended use, and limitations
+3. **Change control for AI**: Prompt changes and model updates treated as design changes under IEC 62304 — version-controlled in `configs/prompts/`
+4. **Transparency**: All AI-generated content clearly marked as "AI-assisted draft — requires human review and approval"
+5. **Bias monitoring**: Track performance across product categories (MRI vs CT vs MolDx) to detect systematic bias
+6. **Data governance**: FDA MAUDE data usage compliant with openFDA Terms of Service; no patient-identifiable data processed
+
+### OneQMS Integration Points
+
+```
+OneQMS Workflow:
+  Complaint Received → Our System → Signal Report → QM Review → QRB Decision → CAPA Record
+                                                         ↑                          ↓
+                                              Human approval gate       Feeds back into OneQMS
+                                              (ISO 13485 §8.2.2)       (ISO 13485 §8.5.2/8.5.3)
+```
+
+| OneQMS Process | Our System's Role | Compliance Requirement |
+|----------------|-------------------|------------------------|
+| Complaint handling (§8.2.2) | Automated extraction + classification | Output must map to QMS-defined complaint categories |
+| Post-market surveillance (§8.2.1) | Trend detection + FDA cross-referencing | Evidence must be traceable to specific MAUDE report numbers |
+| Risk management (ISO 14971 §7) | Draft risk assessment | Must use organization's severity/probability scales |
+| CAPA (§8.5.2/8.5.3) | Recommendation generation | Must distinguish immediate containment vs root-cause investigation vs preventive action |
+| Management review (§5.6) | Aggregated signal reports | Summary metrics (signal count, risk distribution, trending patterns) for periodic review |
+| Document control (§4.2.4) | Report formatting and storage | Reports stored with version, date, author (system + approving QM), retention per QMS |
+
+### Traceability Requirements
+
+Every system output must maintain a complete audit trail satisfying ISO 13485 §4.2.5 (records control) and IEC 62304 §9.5 (maintain records):
+
+```json
+{
+  "report_id": "SR-2026-0089",
+  "document_control": {
+    "revision": "1.0",
+    "status": "DRAFT",
+    "generated_by": "Signal Intelligence System v1.0",
+    "generated_at": "2026-06-01T10:35:00Z",
+    "approved_by": null,
+    "approval_status": "PENDING_QM_REVIEW",
+    "retention_period": "Lifetime of device + 2 years (per ISO 13485 §4.2.5)"
+  },
+  "data_sources": [
+    {"type": "MAUDE", "report_numbers": ["MW5012345", "MW5012346"], "accessed": "2026-06-01"},
+    {"type": "Recall", "recall_ids": ["Z-1234-2024"], "accessed": "2026-06-01"},
+    {"type": "Internal_Complaint", "reference": "CMP-2026-0456", "qms_category": "IMG-QUAL"}
+  ],
+  "ai_transparency": {
+    "model_used": "gpt-4.1-2026-04-14",
+    "model_version_hash": "abc123",
+    "confidence_scores": {"extraction": 0.82, "retrieval_relevance": 0.71, "risk_grounding": 0.68},
+    "aims_qualification_ref": "AIQ-2026-003",
+    "notice": "AI-assisted draft — requires human review and approval per AIMS policy"
+  },
+  "iso14971_risk": {
+    "severity": {"level": "S3", "label": "Serious"},
+    "probability": {"level": "P4", "label": "Occasional"},
+    "risk_level": "UNACCEPTABLE",
+    "hazard_category": "Incorrect diagnostic information (Annex C)",
+    "risk_control_required": true
+  },
+  "iec62304_mapping": {
+    "problem_report_step": "§9.1 — Structured extraction completed",
+    "investigation_step": "§9.2 — FDA evidence retrieved, root cause analyzed",
+    "trend_analysis_step": "§9.6 — Cluster growth rate +12%/month",
+    "resolution_verification": "§9.7 — Effectiveness criteria defined in CAPA"
+  },
+  "qms_integration": {
+    "complaint_category": "IMG-QUAL",
+    "capa_reference": "CAPA-2026-0034 (pending creation)",
+    "pms_trend_id": "TREND-MRI-2026-Q2-004",
+    "regulatory_reporting_trigger": false,
+    "management_review_input": true
+  },
+  "limitations": "MAUDE data is passive surveillance; causal conclusions cannot be drawn. AI risk assessment is advisory only — final risk acceptability determination requires human judgment per ISO 14971 §6.",
+  "regulatory_references": ["ISO 14971:2019 §7.4", "ISO 14971:2019 §7.5", "IEC 62304 §9", "ISO 13485 §8.2.2", "ISO 13485 §8.5.2"]
+}
+```
 
 ---
 
@@ -99,34 +277,48 @@ Outputs:
 
 Proposed Multi-Agent Architecture:
 
-1. Ingestion and Normalization Agent
+> **QMS Integration Note**: Each agent's output is documented, traceable, and compliant with OneQMS, ISO 13485, ISO 14971, IEC 62304, and AIMS requirements. All outputs use QMS-defined terminology and categories.
+
+1. Ingestion and Normalization Agent (Agent 1: Extraction)
 - Cleans raw defect text.
 - Extracts structured fields such as component, failure mode, symptom, likely cause, discovery phase, and affected workflow.
 - Maps free text into a controlled defect ontology.
+- **QMS alignment**: Classification uses QMS-defined categories for defect types, root causes, and preventive measures, ensuring consistency with ISO 13485 complaint handling terminology and IEC 62304 problem classification.
+- **Output format**: Maps to organization's complaint category codes (per §8.2.2).
 
-2. Similarity and Pattern Mining Agent
+2. Similarity and Pattern Mining Module (Deterministic ML Pipeline)
 - Embeds incidents and groups semantically related defects.
 - Detects repeated or emerging themes across teams, versions, and modules.
 - Flags clusters whose growth rate or severity trend is increasing.
+- **QMS alignment**: Clustering validated against QMS historical data and documented patterns. Supports management review (§5.6) by providing trend data and statistical evidence for periodic safety reports.
+- **Output format**: Cluster reports include date range, growth rate, and cross-reference to QMS trend log.
 
-3. FDA Evidence Retrieval Agent
+3. FDA Evidence Retrieval Agent (Agent 3: ReAct Retrieval)
 - Resolves device names, product codes, manufacturers, and regulatory categories.
 - Queries openFDA device event, recall, 510(k), classification, and UDI datasets.
 - Retrieves comparable device failures, recall reasons, and predicate-device context.
+- **QMS alignment**: Recommendations traceable to internal precedent and regulatory guidance (harmonized standards, FDA guidance documents, MDCG guidance). All retrieved evidence documented with source, date accessed, and relevance score for QMS records.
+- **Output format**: Each citation includes MAUDE report number or recall ID — auditable by regulatory affairs.
 
-4. Regulatory Reasoning and Risk Agent
+4. Regulatory Reasoning and Risk Agent (Agent 4: Risk + CAPA)
 - Combines internal defect clusters with retrieved FDA evidence.
-- Produces a draft risk rationale aligned to a simplified ISO 14971-inspired rubric.
+- Produces a draft risk rationale aligned to ISO 14971:2019 methodology.
 - Explicitly separates evidence, assumptions, and uncertainty.
+- **QMS alignment**: Risk scoring follows ISO 14971 with severity classes documented per QMS requirements. Uses the organization's risk acceptability matrix (severity × probability). Hazardous situations identified per Annex C of ISO 14971. Cross-references findings with harmonized standards (IEC 60601, IEC 62304) and regulatory guidance (FDA, MDCG). Documents rationale for any deviations from harmonized standards.
+- **Output format**: Structured risk assessment with fields mapping directly to ISO 14971 §7.4 (risk estimation) and §7.5 (risk evaluation).
 
-5. CAPA Recommendation Agent
+5. CAPA Recommendation Agent (merged into Agent 4)
 - Suggests corrective and preventive actions based on failure patterns and retrieved precedents.
 - Distinguishes immediate containment, root-cause investigation, verification action, and systemic prevention.
+- **QMS alignment**: CAPA structure maps to ISO 13485 §8.5.2 (corrective action) and §8.5.3 (preventive action). Recommendations reference specific regulatory guidance and harmonized standards. Compliance requirements flagged and documented for regulatory submission readiness.
+- **Output format**: Structured CAPA with fields for effectiveness criteria, verification method, and implementation timeline — ready for QMS record entry.
 
-6. Report Assembly and Reviewer Copilot Agent
+6. Report Assembly and Reviewer Copilot Agent (Agent 5: Evaluator-Optimizer)
 - Builds a structured signal report.
 - Includes traceable citations to internal incidents and external FDA evidence.
 - Prepares the final output for human approval rather than autonomous submission.
+- **QMS alignment**: Final report formatted to meet QMS documentation standards (controlled document template), ready for review and approval by the Quality Officer. Includes revision history, approval fields, and distribution list per §4.2.4. Self-critique rubric checks QMS compliance before presenting to reviewer.
+- **Output format**: QRB-ready signal report with all required fields per organization's SOP for post-market signal evaluation.
 
 Why This Version Is Stronger:
 
@@ -321,6 +513,10 @@ Recommended Research Framing:
 Do not say: "the system determines regulatory truth".
 
 Say instead: "the system assists quality and regulatory professionals by surfacing evidence-backed signals, comparable FDA events, and structured risk narratives for human review."
+
+**QMS-aligned framing**: "The system integrates with the organization's OneQMS workflow to provide AI-assisted signal detection and evidence retrieval, generating traceable, standards-compliant draft reports for quality officer review and approval, in accordance with ISO 13485:2016 §8.2.1 (post-market surveillance) and ISO 14971:2019 §10 (production and post-production activities)."
+
+**AIMS-aligned framing**: "All AI components are qualified per the organization's AI Management System, with documented performance validation, bias monitoring, and change control processes ensuring scientific rigor and regulatory defensibility."
 
 Advanced GenAI/ML Techniques — Detailed Integration Plan:
 
@@ -618,6 +814,18 @@ Risks And Mitigations:
 
 - Risk: scope explosion into all healthcare data
 - Mitigation: keep the main domain to SaMD and device-quality surveillance
+
+- Risk: QMS non-compliance of AI outputs
+- Mitigation: all outputs validated against QMS document templates before release; self-critique rubric includes ISO 14971 compliance check; human approval gate mandatory before QMS record entry
+
+- Risk: AIMS audit findings on AI validation
+- Mitigation: document model versions, performance benchmarks, and limitations per AIMS requirements; maintain evaluation records (gold-standard test results) as objective evidence of AI qualification
+
+- Risk: regulatory submission rejected due to AI-generated content
+- Mitigation: system explicitly labeled as "decision support tool" — all regulatory submissions authored/approved by qualified human; AI content marked as draft requiring expert verification
+
+- Risk: deviation from harmonized standards not documented
+- Mitigation: Agent 4 programmatically checks if risk methodology deviates from ISO 14971 Annex C/D; any deviation flagged with rationale field in output JSON
 
 Recommended Final Project Positioning:
 
