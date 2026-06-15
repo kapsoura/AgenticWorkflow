@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Regulatory Signal Intelligence</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a; --panel: #1e293b; --panel-2: #273449; --border: #334155;
+      --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8; --accent-2: #818cf8;
+      --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 80% -10%, #1e293b 0%, var(--bg) 55%);
+      color: var(--text); min-height: 100vh;
+    }
+    header {
+      display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(8px);
+      background: rgba(15,23,42,0.75); z-index: 10;
+    }
+    header .logo { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display:grid; place-items:center; font-weight:800; color:#0b1120; }
+    header h1 { font-size: 1.05rem; margin: 0; font-weight: 700; letter-spacing: 0.2px; }
+    header .sub { color: var(--muted); font-size: 0.8rem; }
+    header .spacer { flex: 1; }
+    .pill { font-size: 0.72rem; padding: 0.2rem 0.6rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .pill.live { color: var(--ok); border-color: rgba(52,211,153,0.4); }
+    main { max-width: 1180px; margin: 0 auto; padding: 1.25rem 1.5rem 4rem; }
+    .tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+    .tab { padding: 0.5rem 0.95rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.86rem; }
+    .tab.active { color: #0b1120; background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; font-weight: 700; }
+    .tab .dot { display:inline-block; min-width: 18px; text-align:center; margin-left: 0.35rem; font-size: 0.7rem; background: rgba(0,0,0,0.2); border-radius: 999px; padding: 0 0.3rem; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.1rem 1.2rem; }
+    .grid { display: grid; gap: 1rem; }
+    .cols-2 { grid-template-columns: 1.1fr 0.9fr; }
+    @media (max-width: 880px) { .cols-2 { grid-template-columns: 1fr; } }
+    label { display: block; margin: 0.85rem 0 0.3rem; font-weight: 600; font-size: 0.85rem; }
+    .hint { color: var(--muted); font-weight: 400; font-size: 0.78rem; }
+    textarea, select, input[type=text], input[type=file] {
+      width: 100%; padding: 0.6rem 0.7rem; font-size: 0.92rem; border-radius: 9px;
+      border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+    }
+    textarea { min-height: 150px; resize: vertical; }
+    .row { display: flex; gap: 0.9rem; } .row > div { flex: 1; }
+    .actions { display: flex; gap: 0.7rem; margin-top: 1.2rem; flex-wrap: wrap; }
+    button {
+      padding: 0.65rem 1.2rem; font-size: 0.9rem; cursor: pointer; border-radius: 9px; border: 1px solid transparent;
+      font-weight: 650;
+    }
+    button.primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #0b1120; }
+    button.ghost { background: var(--panel-2); color: var(--text); border-color: var(--border); }
+    button:disabled { opacity: 0.5; cursor: progress; }
+    .muted { color: var(--muted); }
+    h2.section { font-size: 0.95rem; margin: 0 0 0.8rem; letter-spacing: 0.3px; }
+    h3.section { font-size: 0.84rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin: 1.2rem 0 0.5rem; }
+    .badge { font-size: 0.72rem; padding: 0.15rem 0.55rem; border-radius: 999px; border: 1px solid var(--border); }
+    .badge.pass { color: var(--ok); border-color: rgba(52,211,153,0.4); background: rgba(52,211,153,0.08); }
+    .badge.review { color: var(--warn); border-color: rgba(251,191,36,0.4); background: rgba(251,191,36,0.08); }
+    .badge.type { color: var(--accent); border-color: rgba(56,189,248,0.4); background: rgba(56,189,248,0.08); }
+
+    /* Flow diagram */
+    .flow { display: flex; align-items: stretch; gap: 0.5rem; flex-wrap: wrap; }
+    .node { flex: 1; min-width: 150px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 11px; padding: 0.8rem; position: relative; }
+    .node .nname { font-weight: 700; font-size: 0.9rem; display:flex; align-items:center; gap:0.4rem; }
+    .node .nmeta { color: var(--muted); font-size: 0.76rem; margin-top: 0.45rem; line-height: 1.5; }
+    .node.done { border-color: rgba(52,211,153,0.45); }
+    .node.reviewed { border-color: rgba(251,191,36,0.5); }
+    .arrow { align-self: center; color: var(--muted); font-size: 1.2rem; }
+    @media (max-width: 760px) { .arrow { display:none; } }
+
+    /* Timeline */
+    .timeline { position: relative; margin-top: 0.6rem; }
+    .tl-item { border-left: 2px solid var(--border); padding: 0 0 0.9rem 1rem; position: relative; }
+    .tl-item::before { content:''; position:absolute; left:-6px; top: 2px; width:10px; height:10px; border-radius:50%; background: var(--accent); }
+    .tl-item.review::before { background: var(--warn); }
+    .tl-head { display:flex; gap:0.5rem; align-items:center; flex-wrap: wrap; cursor: pointer; }
+    .tl-agent { font-weight: 700; font-size: 0.86rem; }
+    .tl-event { color: var(--muted); font-size: 0.8rem; }
+    .tl-lat { margin-left:auto; color: var(--muted); font-size: 0.75rem; }
+    pre.meta { background: #0b1120; border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.7rem; font-size: 0.74rem; overflow:auto; margin: 0.5rem 0 0; color: #cbd5e1; max-height: 260px; }
+
+    /* Stat cards */
+    .stats { display:grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 0.8rem; }
+    .stat { background: var(--panel-2); border:1px solid var(--border); border-radius: 11px; padding: 0.8rem 0.9rem; }
+    .stat .v { font-size: 1.5rem; font-weight: 800; }
+    .stat .k { color: var(--muted); font-size: 0.76rem; margin-top: 0.2rem; }
+    .dir-up { color: var(--bad); } .dir-down { color: var(--ok); } .dir-flat { color: var(--muted); }
+
+    .chart-wrap { background: var(--panel-2); border:1px solid var(--border); border-radius:11px; padding: 0.8rem; }
+    .chart-wrap canvas { max-height: 280px; }
+
+    /* Reports */
+    .report-card { background: var(--panel-2); border:1px solid var(--border); border-radius: 11px; padding: 1rem; margin-bottom: 1rem; }
+    .report-head { display:flex; align-items:center; gap:0.6rem; flex-wrap: wrap; }
+    .md { font-size: 0.86rem; line-height: 1.55; max-height: 420px; overflow:auto; margin-top: 0.7rem; border-top: 1px dashed var(--border); padding-top: 0.6rem; }
+    .md h1 { font-size: 1.05rem; } .md h2 { font-size: 0.92rem; color: var(--accent); margin: 0.9rem 0 0.3rem; }
+    .md ul { margin: 0.3rem 0 0.6rem 1.1rem; padding: 0; } .md li { margin: 0.15rem 0; }
+    .catalog { display:grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 0.7rem; }
+    .cat { background: var(--panel-2); border:1px solid var(--border); border-radius: 10px; padding: 0.65rem 0.8rem; }
+    .cat .cn { font-weight: 700; font-size: 0.82rem; }
+    .cat .ck { color: var(--muted); font-size: 0.74rem; margin-top: 0.25rem; }
+    .bp { margin-bottom: 0.9rem; }
+    .bp ol { margin: 0.3rem 0 0 1.1rem; padding: 0; font-size: 0.84rem; }
+    .empty { color: var(--muted); font-size: 0.86rem; padding: 1.4rem; text-align:center; }
+    .err { color: var(--bad); font-size: 0.85rem; margin-top: 0.7rem; }
+    a.dl { color: var(--accent); font-size: 0.82rem; text-decoration: none; border:1px solid var(--border); padding: 0.3rem 0.6rem; border-radius: 8px; }
+    a.dl:hover { border-color: var(--accent); }
+    .spin { display:inline-block; width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:sp 0.7s linear infinite; vertical-align:-2px; }
+    @keyframes sp { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">R</div>
+    <div>
+      <h1>Regulatory Signal Intelligence</h1>
+      <div class="sub">Agentic post-market surveillance · LangGraph validation console</div>
+    </div>
+    <div class="spacer"></div>
+    <span id="status" class="pill">checking…</span>
+  </header>
+
+  <main>
+    <div class="tabs">
+      <div class="tab active" data-tab="submit">Submit</div>
+      <div class="tab" data-tab="flow">LangGraph Flow <span class="dot" id="dot-flow">0</span></div>
+      <div class="tab" data-tab="trend">Trend</div>
+      <div class="tab" data-tab="reports">Reports <span class="dot" id="dot-reports">0</span></div>
+      <div class="tab" data-tab="templates">Templates</div>
+    </div>
+
+    <!-- SUBMIT -->
+    <section data-panel="submit">
+      <div class="grid cols-2">
+        <div class="panel">
+          <h2 class="section">Submit a complaint</h2>
+          <p class="hint">The orchestrator decides which reports the complaint warrants — always a
+          <strong>PSUR</strong>, plus an <strong>Incident Assessment</strong> and/or <strong>CAPA</strong>
+          when the risk profile requires it. Analyze to validate the flow; download to get Word files.</p>
+          <form id="form">
+            <label for="narrative">Complaint narrative</label>
+            <textarea id="narrative" name="narrative" required placeholder="Describe the device complaint…"></textarea>
+            <div class="row">
+              <div>
+                <label for="product_code">Product code</label>
+                <select id="product_code" name="product_code"></select>
+              </div>
+              <div>
+                <label for="event_type">Event type</label>
+                <select id="event_type" name="event_type"></select>
+              </div>
+            </div>
+            <label for="manufacturer">Manufacturer <span class="hint">(optional)</span></label>
+            <input type="text" id="manufacturer" name="manufacturer" placeholder="Unknown" />
+            <label for="template">Skeleton template <span class="hint">(optional .docx — its headings drive one report)</span></label>
+            <input type="file" id="template" name="template" accept=".docx" />
+            <div class="actions">
+              <button type="submit" class="primary" id="analyzeBtn">Analyze &amp; validate</button>
+              <button type="button" class="ghost" id="downloadBtn">Download Word report(s)</button>
+            </div>
+            <div class="err" id="formErr"></div>
+          </form>
+        </div>
+        <div class="panel">
+          <h2 class="section">Sample complaints</h2>
+          <p class="hint">Click to load a scenario, then Analyze.</p>
+          <div id="samples"></div>
+          <h3 class="section">Decision logic</h3>
+          <p class="hint">Injury/Death or escalated risk → adds Incident Assessment. ALARP/UNACCEPTABLE
+          or recall precedent → adds CAPA. PSUR is always produced.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- FLOW -->
+    <section data-panel="flow" hidden>
+      <div class="panel">
+        <h2 class="section">LangGraph pipeline</h2>
+        <div class="flow" id="flowNodes"><div class="empty">Run an analysis to see the flow.</div></div>
+      </div>
+      <div class="panel" style="margin-top:1rem;">
+        <h2 class="section">Activity timeline <span class="hint">— the exact sequence of agent responses</span></h2>
+        <div class="timeline" id="timeline"><div class="empty">No activity yet.</div></div>
+      </div>
+    </section>
+
+    <!-- TREND -->
+    <section data-panel="trend" hidden>
+      <div class="panel">
+        <h2 class="section">Trend for submitted product code</h2>
+        <div class="stats" id="trendStats"><div class="empty">Run an analysis to see trend data.</div></div>
+        <div class="grid cols-2" style="margin-top:1rem;">
+          <div class="chart-wrap"><canvas id="yearChart"></canvas></div>
+          <div class="chart-wrap"><canvas id="problemChart"></canvas></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- REPORTS -->
+    <section data-panel="reports" hidden>
+      <div class="panel">
+        <h2 class="section">Generated reports</h2>
+        <div id="reports"><div class="empty">No reports yet.</div></div>
+      </div>
+    </section>
+
+    <!-- TEMPLATES -->
+    <section data-panel="templates" hidden>
+      <div class="grid cols-2">
+        <div class="panel">
+          <h2 class="section">Built-in report blueprints</h2>
+          <p class="hint">Used when no skeleton is uploaded.</p>
+          <div id="blueprints"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="panel">
+          <h2 class="section">Supported template sections</h2>
+          <p class="hint">An uploaded .docx heading is matched against these keywords. Unmatched headings
+          are flagged for manual completion.</p>
+          <div class="catalog" id="catalog"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:1rem;" id="mappingPanel" hidden>
+        <h2 class="section">Last uploaded template mapping</h2>
+        <div id="mapping"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (s, r=document) => r.querySelector(s);
+    const $$ = (s, r=document) => [...r.querySelectorAll(s)];
+    let yearChart, problemChart, lastForm = null;
+
+    const SAMPLES = [
+      { t: "Fatal MRI overheating", code: "LNH", ev: "Death",
+        n: "During an MRI scan the gradient coil overheated and the patient suffered a fatal thermal injury before the scan could be aborted." },
+      { t: "CT reboot, no harm", code: "JAK", ev: "Malfunction",
+        n: "CT scanner rebooted mid-acquisition and the image series was lost. No patient harm; exam repeated successfully." },
+      { t: "Ultrasound burn", code: "LLZ", ev: "Injury",
+        n: "Ultrasound probe overheated during a routine exam and caused a minor skin burn to the patient." },
+    ];
+
+    // ---------- tabs ----------
+    $$(".tab").forEach(t => t.addEventListener("click", () => {
+      $$(".tab").forEach(x => x.classList.remove("active"));
+      t.classList.add("active");
+      $$("section[data-panel]").forEach(s => s.hidden = s.dataset.panel !== t.dataset.tab);
+    }));
+    function goTab(name){ $(`.tab[data-tab="${name}"]`).click(); }
+
+    // ---------- markdown (minimal) ----------
+    function mdToHtml(md){
+      const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      const lines = md.split("\n"); let html=[]; let inList=false;
+      const bold = s => esc(s).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
+      for (const line of lines){
+        if (line.startsWith("## ")){ if(inList){html.push("</ul>");inList=false;} html.push(`<h2>${bold(line.slice(3))}</h2>`); }
+        else if (line.startsWith("# ")){ if(inList){html.push("</ul>");inList=false;} html.push(`<h1>${bold(line.slice(2))}</h1>`); }
+        else if (line.startsWith("- ")){ if(!inList){html.push("<ul>");inList=true;} html.push(`<li>${bold(line.slice(2))}</li>`); }
+        else if (line.trim()===""){ if(inList){html.push("</ul>");inList=false;} }
+        else { if(inList){html.push("</ul>");inList=false;} html.push(`<p>${bold(line)}</p>`); }
+      }
+      if(inList) html.push("</ul>");
+      return html.join("");
+    }
+
+    // ---------- init ----------
+    async function init(){
+      try {
+        const h = await (await fetch("/health")).json();
+        $("#status").textContent = "service: " + h.status; $("#status").classList.add("live");
+      } catch { $("#status").textContent = "offline"; }
+
+      const meta = await (await fetch("/api/meta")).json();
+      $("#product_code").innerHTML = meta.product_codes.map(c=>`<option>${c}</option>`).join("");
+      $("#event_type").innerHTML = meta.event_types.map(c=>`<option>${c}</option>`).join("");
+
+      $("#samples").innerHTML = SAMPLES.map((s,i)=>
+        `<button type="button" class="ghost" data-s="${i}" style="margin:0.25rem 0.4rem 0 0;">${s.t}</button>`).join("");
+      $$("#samples button").forEach(b=>b.addEventListener("click",()=>{
+        const s = SAMPLES[+b.dataset.s];
+        $("#narrative").value = s.n; $("#product_code").value = s.code; $("#event_type").value = s.ev;
+      }));
+
+      loadTemplates();
+    }
+
+    async function loadTemplates(){
+      try {
+        const data = await (await fetch("/api/templates")).json();
+        $("#blueprints").innerHTML = Object.entries(data.blueprints).map(([type, secs]) =>
+          `<div class="bp"><span class="badge type">${type}</span>
+            <ol>${secs.map(s=>`<li>${s.title} <span class="hint">(${s.name})</span></li>`).join("")}</ol></div>`).join("");
+        $("#catalog").innerHTML = data.section_catalog.map(c =>
+          `<div class="cat"><div class="cn">${c.section}</div><div class="ck">${c.keywords.join(" · ")}</div></div>`).join("");
+      } catch(e){ $("#blueprints").innerHTML = `<div class="err">Could not load templates.</div>`; }
+    }
+
+    // ---------- analyze ----------
+    function formData(){
+      const fd = new FormData();
+      fd.append("narrative", $("#narrative").value.trim());
+      fd.append("product_code", $("#product_code").value);
+      fd.append("event_type", $("#event_type").value);
+      fd.append("manufacturer", $("#manufacturer").value || "Unknown");
+      const f = $("#template").files[0]; if (f) fd.append("template", f);
+      return fd;
+    }
+
+    $("#form").addEventListener("submit", async (e)=>{
+      e.preventDefault();
+      const narrative = $("#narrative").value.trim();
+      if (!narrative){ $("#formErr").textContent = "Please enter a complaint narrative."; return; }
+      $("#formErr").textContent = "";
+      const btn = $("#analyzeBtn"); btn.disabled = true; const old = btn.innerHTML;
+      btn.innerHTML = `<span class="spin"></span> Analyzing…`;
+      try {
+        lastForm = formData();
+        const res = await fetch("/api/analyze", { method:"POST", body: lastForm });
+        if (!res.ok) throw new Error("Analyze failed ("+res.status+")");
+        const data = await res.json();
+        render(data); goTab("flow");
+      } catch(err){ $("#formErr").textContent = err.message; }
+      finally { btn.disabled = false; btn.innerHTML = old; }
+    });
+
+    $("#downloadBtn").addEventListener("click", async ()=>{
+      const narrative = $("#narrative").value.trim();
+      if (!narrative){ $("#formErr").textContent = "Please enter a complaint narrative."; return; }
+      const btn = $("#downloadBtn"); btn.disabled = true; const old = btn.textContent; btn.textContent = "Preparing…";
+      try {
+        const res = await fetch("/generate", { method:"POST", body: formData() });
+        if (!res.ok) throw new Error("Generate failed ("+res.status+")");
+        const blob = await res.blob();
+        const cd = res.headers.get("content-disposition") || "";
+        const m = cd.match(/filename="?([^"]+)"?/); const name = m ? m[1] : "report";
+        const url = URL.createObjectURL(blob); const a = document.createElement("a");
+        a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+      } catch(err){ $("#formErr").textContent = err.message; }
+      finally { btn.disabled = false; btn.textContent = old; }
+    });
+
+    // ---------- render results ----------
+    function render(d){
+      renderFlow(d); renderTimeline(d.timeline); renderTrend(d.trend);
+      renderReports(d.reports); renderMapping(d);
+      $("#dot-flow").textContent = d.timeline.length;
+      $("#dot-reports").textContent = d.reports.length;
+    }
+
+    function renderFlow(d){
+      const tl = d.timeline;
+      const stage = (agent) => tl.find(e => e.agent === agent);
+      const stages = [
+        { key:"extract", label:"① Extract", desc: e => `category: ${d.extraction.qms_complaint_category}<br>confidence: ${d.extraction.confidence}` },
+        { key:"retrieve", label:"② Retrieve", desc: e => `evidence kept: ${(e&&e.metadata&&e.metadata.kept_items) ?? d.evidence_count}<br>subqueries: ${d.subqueries.length}` },
+        { key:"risk", label:"③ Risk", desc: e => `bucket: ${d.risk.risk_bucket}<br>report type: ${d.risk.report_type}` },
+        { key:"assemble", label:"④ Assemble", desc: e => `reports: ${d.report_types.join(", ")}` },
+      ];
+      const html = stages.map((s, i) => {
+        const ev = stage(s.key);
+        const gate = ev ? (ev.gate_result || "pass") : "—";
+        const lat = ev && ev.latency_ms != null ? `${ev.latency_ms} ms` : "";
+        const cls = gate === "review" ? "reviewed" : (ev ? "done" : "");
+        const badge = ev ? `<span class="badge ${gate==='review'?'review':'pass'}">${gate}</span>` : "";
+        const node = `<div class="node ${cls}">
+            <div class="nname">${s.label} ${badge}</div>
+            <div class="nmeta">${s.desc(ev)}<br><span class="hint">${lat}</span></div>
+          </div>`;
+        return node + (i < stages.length-1 ? `<div class="arrow">→</div>` : "");
+      }).join("");
+      $("#flowNodes").innerHTML = html;
+    }
+
+    function renderTimeline(events){
+      if (!events.length){ $("#timeline").innerHTML = `<div class="empty">No activity.</div>`; return; }
+      $("#timeline").innerHTML = events.map((e,i)=>{
+        const review = e.gate_result === "review";
+        const lat = e.latency_ms != null ? `${e.latency_ms} ms` : "";
+        const meta = JSON.stringify(e.metadata, null, 2);
+        return `<div class="tl-item ${review?'review':''}">
+          <div class="tl-head" data-i="${i}">
+            <span class="tl-agent">${e.agent}</span>
+            <span class="tl-event">${e.event}</span>
+            ${e.gate_result?`<span class="badge ${review?'review':'pass'}">${e.gate_result}</span>`:""}
+            <span class="tl-lat">${lat}</span>
+          </div>
+          <pre class="meta" id="meta-${i}" hidden>${meta.replace(/</g,"&lt;")}</pre>
+        </div>`;
+      }).join("");
+      $$("#timeline .tl-head").forEach(h=>h.addEventListener("click",()=>{
+        const p = $("#meta-"+h.dataset.i); p.hidden = !p.hidden;
+      }));
+    }
+
+    function renderTrend(trend){
+      const s = trend.summary;
+      const dirClass = s.trend_direction==="upward"?"dir-up":s.trend_direction==="downward"?"dir-down":"dir-flat";
+      $("#trendStats").innerHTML = `
+        <div class="stat"><div class="v">${s.total_events}</div><div class="k">Total events in archive</div></div>
+        <div class="stat"><div class="v">${s.software_problem_events}</div><div class="k">Software-like problems</div></div>
+        <div class="stat"><div class="v">${s.previous_year_events} → ${s.latest_year_events}</div><div class="k">Prev → latest year</div></div>
+        <div class="stat"><div class="v ${dirClass}">${s.trend_direction}</div><div class="k">Trend direction</div></div>`;
+
+      const yc = trend.yearly, pc = trend.problems;
+      if (yearChart) yearChart.destroy(); if (problemChart) problemChart.destroy();
+      if (window.Chart){
+        yearChart = new Chart($("#yearChart"), {
+          type: "bar",
+          data: { labels: yc.map(x=>x.year), datasets: [{ label:"Events per year", data: yc.map(x=>x.count),
+            backgroundColor:"rgba(56,189,248,0.5)", borderColor:"#38bdf8", borderWidth:1 }] },
+          options: chartOpts("Events reported per year")
+        });
+        problemChart = new Chart($("#problemChart"), {
+          type: "bar",
+          data: { labels: pc.map(x=>x.problem), datasets: [{ label:"Reported problems", data: pc.map(x=>x.count),
+            backgroundColor:"rgba(129,140,248,0.5)", borderColor:"#818cf8", borderWidth:1 }] },
+          options: { ...chartOpts("Top reported product problems"), indexAxis: "y" }
+        });
+      }
+    }
+    function chartOpts(title){
+      return { responsive:true, plugins:{ legend:{display:false}, title:{display:true,text:title,color:"#cbd5e1"} },
+        scales:{ x:{ ticks:{color:"#94a3b8"}, grid:{color:"#1f2a3a"} }, y:{ ticks:{color:"#94a3b8"}, grid:{color:"#1f2a3a"} } } };
+    }
+
+    function renderReports(reports){
+      if (!reports.length){ $("#reports").innerHTML = `<div class="empty">No reports.</div>`; return; }
+      $("#reports").innerHTML = reports.map(r=>{
+        const rev = r.review_needed ? `<span class="badge review">review needed</span>` : `<span class="badge pass">clean</span>`;
+        const q = r.questions.length ? `<div class="hint" style="margin-top:0.5rem;">Decision questions: ${r.questions.join(" · ")}</div>` : "";
+        return `<div class="report-card">
+          <div class="report-head">
+            <span class="badge type">${r.report_type}</span> ${rev}
+            <span class="hint">${r.report_id}</span>
+            <span style="margin-left:auto;"><a class="dl" href="/download/${encodeURIComponent(r.docx_name)}">⬇ .docx</a></span>
+          </div>
+          ${q}
+          <div class="md">${mdToHtml(r.markdown)}</div>
+        </div>`;
+      }).join("");
+    }
+
+    function renderMapping(d){
+      if (!d.used_template){ $("#mappingPanel").hidden = true; return; }
+      $("#mappingPanel").hidden = false;
+      $("#mapping").innerHTML = `<div class="catalog">` + d.template_sections.map(s=>{
+        const unmapped = s.name === "unmapped";
+        return `<div class="cat"><div class="cn">${s.title}</div>
+          <div class="ck">→ ${unmapped ? '<span class="dir-up">unmapped (manual)</span>' : s.name}</div></div>`;
+      }).join("") + `</div>`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

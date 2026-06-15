@@ -66,3 +66,8 @@ These come from the agentic-AI audit and the QMS framework; each spec restates t
 ## Spec Template
 
 Each spec follows: metadata table → User Story → Context → Scope → Inputs/Outputs → Acceptance Criteria → Technical Approach → Dependencies → Test Plan → Definition of Done.
+
+## Current Build Snapshot
+
+- [SPEC-V1-5-agent-workflow.md](SPEC-V1-5-agent-workflow.md): executable baseline for the fixed 3-product, 5-agent workflow with LangGraph orchestration.
+- [COVERAGE-US01-US18.md](COVERAGE-US01-US18.md): explicit coverage matrix and contradiction check against the full US-01..US-18 plan.
