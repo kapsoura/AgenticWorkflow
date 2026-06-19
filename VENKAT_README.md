@@ -8,14 +8,14 @@
 
 ## What This Agent Does
 
-Given a structured complaint (from Mohammade's Extraction Agent), this agent:
+Given a structured complaint (from Extraction Agent (Agent 1)), this agent:
 
 1. **Plans** — LLM decides which tools to call based on the complaint *(not hardcoded)*
 2. **Retrieves** — hits OpenFDA adverse event database for similar cases
 3. **Recalls** — fetches FDA recall records as CAPA precedents
 4. **Counts** — measures event frequency for ISO 14971 probability calibration
-5. **Searches** — queries Ayan's local ChromaDB vector index for semantic matches
-6. **Writes** — stores results in Pranav's shared `pipeline_state`
+5. **Searches** — queries Extraction Agent's local ChromaDB vector index for semantic matches
+6. **Writes** — stores results in Orchestrator's shared `pipeline_state`
 
 > → The LLM decides which tools to call. Different complaints → different tool plans.
 
@@ -42,7 +42,7 @@ ExtractionOutput
    │  search_adverse_events()            │  OpenFDA /device/event
    │  search_recalls()                   │  OpenFDA /device/recall
    │  count_events_by_problem()          │  OpenFDA count query
-   │  search_chromadb()                  │  Ayan's ChromaDB index
+   │  search_chromadb()                  │  Extraction Agent's ChromaDB index
    │  get_device_info()                  │  OpenFDA /device/510k
    └─────────────────────────────────────┘
         │

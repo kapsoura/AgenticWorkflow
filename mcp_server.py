@@ -15,7 +15,7 @@ can call via the MCP (Model Context Protocol) interface:
             → FDA recall records with root causes
 
     Tool 3: query_chromadb(query, k, filter_modality)
-            → raw vector similarity search on Ayan's embeddings
+            → raw vector similarity search on Extraction Agent's embeddings
 
 No API key required. Talks to OpenFDA public API + local ChromaDB.
 """
@@ -113,7 +113,7 @@ TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "query_chromadb",
         "description": (
-            "Query Ayan's local ChromaDB vector store for semantically "
+            "Query Extraction Agent's local ChromaDB vector store for semantically "
             "similar adverse event narratives. Faster than live FDA API. "
             "Use this first; fall back to search_maude if unavailable."
         ),
@@ -168,7 +168,7 @@ class MCPServer:
                 print(f"[MCP] ✅ ChromaDB '{COLLECTION_NAME}' ready")
             else:
                 print(f"[MCP] ⚠️  ChromaDB up but '{COLLECTION_NAME}' missing — "
-                      "run Ayan's embed_index.py")
+                      "run Extraction Agent's embed_index.py")
         except Exception as ex:
             print(f"[MCP] ChromaDB init failed: {ex}")
 
@@ -358,7 +358,7 @@ class MCPServer:
             "success": True,
             "data": {"total_returned": len(mock), "results": mock},
             "error": None,
-            "warning": "Mock — run Ayan's embed_index.py to activate real ChromaDB",
+            "warning": "Mock — run Extraction Agent's embed_index.py to activate real ChromaDB",
         }
 
     # ── OpenFDA HTTP helper ───────────────────────────
@@ -367,7 +367,7 @@ class MCPServer:
         for attempt in range(MAX_RETRIES):
             try:
                 req = urllib.request.Request(
-                    url, headers={"User-Agent": "IISc-MedSig-Venkat/1.0"}
+                    url, headers={"User-Agent": "IISc-MedSig-RetrievalAgent/1.0"}
                 )
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     time.sleep(RATE_DELAY)
