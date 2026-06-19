@@ -1,6 +1,5 @@
 # Retrieval Agent — Agent 3
-### Medical Device Signal Intelligence Pipeline
-**IISc Bangalore · Deep Learning Project · June 2026**
+### Multi-Agent-Quality-Intelligence Pipeline
 
 ---
 
