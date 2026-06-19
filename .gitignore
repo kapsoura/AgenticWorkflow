@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Large data files — re-download via scripts
+data/maude_events/
+data/recalls/
+data/embeddings/
+data/chromadb/
+
+# Analysis outputs (generated)
+data/analysis/*.json
+
+# Secrets
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
