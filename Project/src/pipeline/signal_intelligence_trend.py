@@ -12,6 +12,9 @@ from src.pipeline.signal_intelligence_db import get_connection
 from src.pipeline.signal_intelligence_schemas import SimilarEvent, SimilarityOutput, TrendFlag
 
 UMAP_CACHE_PATH = RUNTIME_DIR / "signal_intelligence" / "umap_projection.npy"
+# Per-event HDBSCAN labels persisted by the offline build so the online agent can
+# assign complaints to existing clusters without ever re-running HDBSCAN.
+CLUSTER_LABELS_PATH = RUNTIME_DIR / "signal_intelligence" / "cluster_labels.npz"
 
 
 class TrendAnalyzer:
@@ -54,6 +57,50 @@ class TrendAnalyzer:
             self.labels = np.zeros((len(embeddings),), dtype=int)
         self._compute_centroids()
         return self.labels
+
+    def load_clusters(
+        self,
+        embeddings: np.ndarray,
+        report_numbers: list[str],
+        labels: np.ndarray,
+    ) -> np.ndarray:
+        """Restore a pre-built cluster index without re-running HDBSCAN.
+
+        Used at request time: the offline build already fit HDBSCAN and persisted
+        the per-event labels, so the online agent only needs to recompute the
+        (cheap) centroids and is ready to assign new complaints by nearest
+        centroid. No clustering happens here.
+        """
+        self.embeddings = embeddings
+        self.report_numbers = report_numbers
+        self.labels = np.asarray(labels)
+        self.clusterer = None
+        self._compute_centroids()
+        return self.labels
+
+    def save_labels(self, path: Optional[Path] = None) -> None:
+        """Persist the per-event HDBSCAN labels alongside the embeddings index."""
+        if self.labels is None or self.report_numbers is None:
+            return
+        save_path = path or CLUSTER_LABELS_PATH
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            str(save_path),
+            labels=np.asarray(self.labels),
+            report_numbers=np.array(self.report_numbers),
+        )
+
+    @staticmethod
+    def load_labels(path: Optional[Path] = None) -> Optional[tuple[np.ndarray, list[str]]]:
+        """Load persisted labels, or None when the artifact is absent/unreadable."""
+        load_path = path or CLUSTER_LABELS_PATH
+        if not Path(load_path).exists():
+            return None
+        try:
+            data = np.load(str(load_path))
+            return data["labels"], data["report_numbers"].tolist()
+        except Exception:
+            return None
 
     def _compute_centroids(self):
         self.cluster_centroids = {}
@@ -257,6 +304,7 @@ def run_trend_pipeline(embeddings: np.ndarray, report_numbers: list[str]):
     conn = get_connection()
     analyzer = TrendAnalyzer()
     analyzer.fit_clusters(embeddings, report_numbers)
+    analyzer.save_labels()
     analyzer.compute_umap()
     analyzer.save_clusters_to_db(conn)
     conn.close()

@@ -67,9 +67,10 @@ def main() -> int:
     n_noise = sum(1 for c in labels if c == -1)
     print(f"HDBSCAN: {n_clusters} clusters, {n_noise} noise points")
 
+    analyzer.save_labels()
     analyzer.compute_umap()
     analyzer.save_clusters_to_db(conn)
-    print("Saved clusters to DB. Done.")
+    print("Saved clusters + per-event labels to DB/disk. Done.")
     return 0
 
 

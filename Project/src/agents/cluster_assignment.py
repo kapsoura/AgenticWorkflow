@@ -51,7 +51,21 @@ class ClusterAssignmentAgent:
                     )
 
                 analyzer = TrendAnalyzer()
-                analyzer.fit_clusters(embeddings, report_numbers)
+                # Clustering is an OFFLINE step (src.build_clusters). At request time
+                # we only load the persisted per-event labels and assign the new
+                # complaint to the nearest existing cluster -- HDBSCAN never runs here.
+                persisted = TrendAnalyzer.load_labels()
+                if (
+                    persisted is not None
+                    and list(persisted[1]) == list(report_numbers)
+                    and len(persisted[0]) == len(embeddings)
+                ):
+                    analyzer.load_clusters(embeddings, report_numbers, persisted[0])
+                else:
+                    # Legacy/stale index without persisted labels: recover them once
+                    # and cache to disk so subsequent launches skip the refit too.
+                    analyzer.fit_clusters(embeddings, report_numbers)
+                    analyzer.save_labels()
 
                 self._embedder = embedder
                 self._analyzer = analyzer
