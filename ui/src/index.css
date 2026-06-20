@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --bg-primary: #0a0a1a;
+  --bg-secondary: #12122a;
+  --bg-card: #181840;
+  --bg-card-hover: #1f1f55;
+  --bg-input: #0e0e25;
+
+  --accent-blue: #4f8cff;
+  --accent-cyan: #06d6a0;
+  --accent-purple: #a855f7;
+  --accent-orange: #ff6b35;
+  --accent-pink: #ec4899;
+  --accent-yellow: #fbbf24;
+
+  --gradient-primary: linear-gradient(135deg, #4f8cff 0%, #a855f7 100%);
+  --gradient-success: linear-gradient(135deg, #06d6a0 0%, #4f8cff 100%);
+  --gradient-danger: linear-gradient(135deg, #ff6b35 0%, #ec4899 100%);
+
+  --text-primary: #f0f0ff;
+  --text-secondary: #a0a0cc;
+  --text-muted: #6b6b99;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-accent: rgba(79, 140, 255, 0.3);
+
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 40px rgba(79, 140, 255, 0.1);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background:
+    radial-gradient(ellipse at 15% 15%, rgba(79, 140, 255, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 85%, rgba(168, 85, 247, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(6, 214, 160, 0.02) 0%, transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-card-hover);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-blue);
+}

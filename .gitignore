@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+*.egg
+.env
+venv/
+.venv/
+
+# Data files
+*.db
+*.sqlite3
+data/embeddings.npz
+data/umap_projection.npy
+
+# Node
+ui/node_modules/
+ui/dist/
+
+# IDE
+.vscode/
+.idea/
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
