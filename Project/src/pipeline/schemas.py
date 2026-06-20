@@ -50,6 +50,22 @@ class RiskAssessment:
     capa_recommendation: str
     report_type: str
     iso_14971_rationale: str
+    # --- richer ISO 14971 fields from the two-pass risk agent (optional) ---
+    hazardous_situation: str = ""
+    harm: str = ""
+    severity_rationale: str = ""
+    probability_rationale: str = ""
+    evidence_basis: List[Dict[str, Any]] = field(default_factory=list)
+    uncertainty: str = ""
+    capa_immediate: str = ""
+    capa_investigation: str = ""
+    capa_corrective: str = ""
+    capa_preventive: str = ""
+    capa_verification: str = ""
+    capa_effectiveness: str = ""
+    capa_precedent: str = ""
+    fsca_required: bool = False
+    llm_backed: bool = False
 
 
 @dataclass
