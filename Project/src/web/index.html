@@ -346,6 +346,19 @@
 
     // ---------- render results ----------
     function render(d){
+      if (d.rejected){
+        const reasons = (d.rejection_reasons || ["No report produced."])
+          .map(r => `<li>${String(r).replace(/</g,"&lt;")}</li>`).join("");
+        $("#flowNodes").innerHTML =
+          `<div class="node reviewed"><div class="nname">Complaint not processed</div>` +
+          `<div class="nmeta">No report was produced (rejected at a guardrail or timed out).<ul>${reasons}</ul></div></div>`;
+        renderTimeline(d.timeline);
+        $("#trendStats").innerHTML = `<div class="empty">No trend data for a rejected complaint.</div>`;
+        renderReports([]);
+        $("#dot-flow").textContent = d.timeline.length;
+        $("#dot-reports").textContent = 0;
+        return;
+      }
       renderFlow(d); renderTimeline(d.timeline); renderTrend(d.trend);
       renderReports(d.reports); renderMapping(d);
       $("#dot-flow").textContent = d.timeline.length;

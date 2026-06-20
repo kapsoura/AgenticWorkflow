@@ -96,6 +96,9 @@ class SignalReport:
     report_markdown: str
     review_needed: bool = False
     review_reasons: List[str] = field(default_factory=list)
+    # Self-critique (evaluator-optimizer) telemetry: citation_count,
+    # unsupported_claims, self_score, rounds, approved, review_needed, issues.
+    quality: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

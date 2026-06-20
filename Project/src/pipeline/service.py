@@ -76,15 +76,25 @@ class SignalService:
 
         trace_id = f"web-{uuid4().hex[:8]}-{complaint.complaint_id}"
         tracer = TraceLogger(trace_id=trace_id, logs_dir=LOGS_DIR)
-        reports = self.workflow.run_for_complaint(
-            trace_id=trace_id,
-            tracer=tracer,
-            complaint=complaint,
-            events_by_code=self.events_by_code,
-            recalls=self.recalls,
-            vector_collection=self.vector_collection,
-            template_sections=template_sections,
-        )
+        try:
+            reports = self.workflow.run_for_complaint(
+                trace_id=trace_id,
+                tracer=tracer,
+                complaint=complaint,
+                events_by_code=self.events_by_code,
+                recalls=self.recalls,
+                vector_collection=self.vector_collection,
+                template_sections=template_sections,
+            )
+        except TimeoutError as exc:
+            tracer.log(
+                agent="workflow",
+                event="timeout",
+                gate_result="review",
+                error=str(exc),
+                metadata={"complaint_id": complaint.complaint_id},
+            )
+            reports = []
         for report in reports:
             persist_signal_report(SQLITE_DB_PATH, report)
         return reports
@@ -120,18 +130,50 @@ class SignalService:
 
         trace_id = f"web-{uuid4().hex[:8]}-{complaint.complaint_id}"
         tracer = TraceLogger(trace_id=trace_id, logs_dir=LOGS_DIR)
-        reports = self.workflow.run_for_complaint(
-            trace_id=trace_id,
-            tracer=tracer,
-            complaint=complaint,
-            events_by_code=self.events_by_code,
-            recalls=self.recalls,
-            vector_collection=self.vector_collection,
-            template_sections=template_sections,
-        )
+        try:
+            reports = self.workflow.run_for_complaint(
+                trace_id=trace_id,
+                tracer=tracer,
+                complaint=complaint,
+                events_by_code=self.events_by_code,
+                recalls=self.recalls,
+                vector_collection=self.vector_collection,
+                template_sections=template_sections,
+            )
+        except TimeoutError as exc:
+            tracer.log(
+                agent="workflow",
+                event="timeout",
+                gate_result="review",
+                error=str(exc),
+                metadata={"complaint_id": complaint.complaint_id},
+            )
+            reports = []
+
+        # The graph can legitimately produce no report (input-guardrail rejection
+        # or a timeout). Return a structured, UI-renderable payload instead of
+        # dereferencing reports[0] and crashing the request.
+        if not reports:
+            last = tracer.events[-1] if tracer.events else {}
+            reasons = (last.get("metadata", {}) or {}).get("reasons") or [
+                "No report produced (complaint rejected at a guardrail or timed out)."
+            ]
+            return {
+                "trace_id": trace_id,
+                "complaint": asdict(complaint),
+                "used_template": used_template,
+                "template_sections": [
+                    {"name": s.name, "title": s.title} for s in (template_sections or [])
+                ],
+                "rejected": True,
+                "rejection_reasons": reasons,
+                "report_types": [],
+                "reports": [],
+                "timeline": tracer.events,
+            }
+
         for report in reports:
             persist_signal_report(SQLITE_DB_PATH, report)
-
         events = self.events_by_code.get(code, [])
         analyzer = self.workflow.trend_agent
         primary = reports[0]

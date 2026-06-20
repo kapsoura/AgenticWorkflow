@@ -59,3 +59,28 @@ class AnthropicClient:
             return json.loads(text[start : end + 1])
         except Exception:
             return fallback
+
+    def complete_text(self, system_prompt: str, user_prompt: str, fallback: str = "") -> str:
+        """Return a plain-text completion (no JSON parsing).
+
+        Used by the report agent's optimizer step, where the model returns a full
+        revised markdown document rather than a JSON envelope.
+        """
+        if not self._client:
+            return fallback
+
+        try:
+            response = self._client.messages.create(
+                max_tokens=4000,
+                temperature=0,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            text = ""
+            for block in response.content:
+                block_text = getattr(block, "text", "")
+                if block_text:
+                    text += block_text
+            return text.strip() or fallback
+        except Exception:
+            return fallback
