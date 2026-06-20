@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
@@ -14,14 +15,7 @@ from src.pipeline.service import SignalService
 from src.utils.docx_io import extract_headings_from_docx, render_report_docx
 
 
-app = FastAPI(title="Regulatory Signal Intelligence API", version="0.3.0")
-
-WEB_DIR = Path(__file__).resolve().parent / "web"
-
-# Report types the user can expect from the orchestrator's decision.
-ACTIVE_REPORT_TYPES = ["PSUR", "INCIDENT_ASSESSMENT", "CAPA"]
-
-# Lazily-initialised shared service (loads the archive once on first use).
+# Shared service holding the loaded archive (FDA events, recalls, SQLite, Chroma).
 _service: Optional[SignalService] = None
 
 
@@ -30,6 +24,27 @@ def get_service() -> SignalService:
     if _service is None:
         _service = SignalService()
     return _service
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load the working archive at application startup so the database (SQLite tables
+    # + Chroma vectors) is ready before the first request, rather than paying the
+    # one-time load cost lazily on the first call.
+    get_service()
+    yield
+
+
+app = FastAPI(
+    title="Regulatory Signal Intelligence API",
+    version="0.4.0",
+    lifespan=lifespan,
+)
+
+WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# Report types the user can expect from the orchestrator's decision.
+ACTIVE_REPORT_TYPES = ["PSUR", "INCIDENT_ASSESSMENT", "CAPA"]
 
 
 class WorkflowRequest(BaseModel):

@@ -1,69 +1,171 @@
+import json
 from collections import Counter
-from datetime import datetime
-import os
-from threading import Lock
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
+from src.agents.agent_tools import trend_tool_specs
 from src.pipeline.schemas import TrendSummary
-from src.pipeline.signal_intelligence_pipeline import SignalIntelligencePipeline
-
-
-_PIPELINE_LOCK = Lock()
-_SHARED_PIPELINE = None
-
-
-def _get_shared_pipeline() -> SignalIntelligencePipeline:
-    global _SHARED_PIPELINE
-    with _PIPELINE_LOCK:
-        if _SHARED_PIPELINE is None:
-            _SHARED_PIPELINE = SignalIntelligencePipeline(
-                model=os.getenv("EXTRACTION_MODEL", "mistral-small"),
-                base_url=os.getenv("EXTRACTION_BASE_URL", "http://localhost:11434"),
-            )
-        return _SHARED_PIPELINE
+from src.utils.llm_client import AnthropicClient
+from src.utils.prompt_store import render_prompt
+from src.utils.tool_loop import AnthropicToolClient
 
 
 class ArchiveTrendAnalyzer:
-    """Trend analyzer with integrated backend only.
+    """Per-code trend assessment routed through Anthropic.
 
-    If integrated trend analysis is unavailable, return an explicit
-    not-available summary instead of heuristic trend classification.
+    Preferred path: real Anthropic tool use — the model calls read-only tools
+    (yearly counts, top problems) to inspect the archive, then commits to a trend
+    DIRECTION and rationale. Falls back to the ``claude -p`` JSON path when no
+    ANTHROPIC_API_KEY is set. There is **no heuristic fallback** — if neither
+    backend is enabled or the model returns nothing usable, the summary is
+    NOT_AVAILABLE so the report flags it for human review.
     """
 
     SOFTWARE_HINTS = ("software", "application", "algorithm", "image", "dicom")
+    _VALID_DIRECTIONS = {"upward", "downward", "flat"}
 
     def __init__(self):
-        self.backend = os.getenv("TREND_BACKEND", "integrated").strip().lower()
-        self.last_backend = "integrated"
-        self.last_fallback_reason = None
-        self._hdbscan = None
-        self._np = None
-        self._vectorizer = None
-        self._pipeline = None
-
-        try:
-            self._pipeline = _get_shared_pipeline()
-            self.backend = "integrated"
-        except Exception as exc:
-            self.last_fallback_reason = f"Integrated trend backend unavailable: {exc}"
-            self.backend = "integrated_unavailable"
+        self.llm = AnthropicClient()
+        self.tool_client = AnthropicToolClient()
+        self.last_tool_calls: List[str] = []
+        self.last_fallback_reason: Optional[str] = None
+        if self.tool_client.enabled:
+            self.last_backend = "anthropic_tools"
+        elif self.llm.enabled:
+            self.last_backend = "anthropic"
+        else:
+            self.last_backend = "unavailable"
+            self.last_fallback_reason = (
+                "No Anthropic backend enabled (set ANTHROPIC_API_KEY for tools or "
+                "CLAUDE_CLI_PATH for the CLI in .env)"
+            )
 
     def summarize(self, product_code: str, events: List[dict]) -> TrendSummary:
-        if self.backend == "integrated" and self._pipeline is not None and len(events) >= 1:
+        self.last_tool_calls = []
+
+        if not events:
+            self.last_backend = "unavailable"
+            self.last_fallback_reason = "No events in working archive for this product code"
+            return self._not_available_summary(product_code)
+
+        # Preferred path: real Anthropic tool use (model inspects the aggregates
+        # via tools, then commits to a direction). Falls back to the CLI JSON path.
+        if self.tool_client.enabled:
             try:
-                result = self._summarize_integrated(product_code, events)
-                self.last_backend = "integrated"
-                self.last_fallback_reason = None
-                return result
-            except Exception as exc:
-                self.last_backend = "integrated_unavailable"
-                self.last_fallback_reason = f"Integrated trend unavailable: {exc}"
+                return self._summarize_with_tools(product_code, events)
+            except Exception as exc:  # noqa: BLE001 — surface, then try the CLI path
+                self.last_fallback_reason = f"Anthropic tool trend analysis failed: {exc}"
+
+        if self.llm.enabled:
+            try:
+                return self._summarize_llm(product_code, events)
+            except Exception as exc:  # noqa: BLE001 — surface the reason via the trace
+                self.last_backend = "unavailable"
+                self.last_fallback_reason = f"Anthropic trend analysis failed: {exc}"
                 return self._not_available_summary(product_code)
 
-        self.last_backend = "integrated_unavailable"
-        if not self.last_fallback_reason:
-            self.last_fallback_reason = "Integrated trend backend not configured"
+        if not self.tool_client.enabled and not self.llm.enabled:
+            self.last_backend = "unavailable"
+            self.last_fallback_reason = (
+                "No Anthropic backend enabled (set ANTHROPIC_API_KEY or CLAUDE_CLI_PATH in .env)"
+            )
         return self._not_available_summary(product_code)
+
+    def _summarize_with_tools(self, product_code: str, events: List[dict]) -> TrendSummary:
+        software_problem_events, latest_count, previous_count = self._aggregate(events)
+        result = self.tool_client.run(
+            system_prompt=render_prompt("trend_tools_system"),
+            user_prompt=render_prompt(
+                "trend_tools_user",
+                product_code=product_code,
+                total_events=len(events),
+                software_problem_events=software_problem_events,
+                previous_year_events=previous_count,
+                latest_year_events=latest_count,
+            ),
+            tools=trend_tool_specs(self, events),
+            max_tokens=600,
+        )
+        self.last_tool_calls = [inv.name for inv in result.invocations]
+
+        verdict = result.json_object()
+        direction = str(verdict.get("trend_direction", "")).strip().lower()
+        if direction not in self._VALID_DIRECTIONS:
+            self.last_backend = "anthropic_tools"
+            self.last_fallback_reason = "Anthropic tool model returned no usable trend direction"
+            return self._not_available_summary(product_code)
+
+        self.last_backend = "anthropic_tools"
+        self.last_fallback_reason = None
+        return TrendSummary(
+            product_code=product_code,
+            total_events=len(events),
+            software_problem_events=software_problem_events,
+            latest_year_events=latest_count,
+            previous_year_events=previous_count,
+            trend_direction=direction,
+            trend_rationale=str(verdict.get("rationale", "")).strip(),
+        )
+
+    def _summarize_llm(self, product_code: str, events: List[dict]) -> TrendSummary:
+        software_problem_events, latest_count, previous_count = self._aggregate(events)
+        yearly = self.yearly_breakdown(events)
+        problems = self.problem_breakdown(events)
+
+        result = self.llm.complete_json(
+            system_prompt=render_prompt("trend_system"),
+            user_prompt=render_prompt(
+                "trend_user",
+                product_code=product_code,
+                total_events=len(events),
+                software_problem_events=software_problem_events,
+                previous_year_events=previous_count,
+                latest_year_events=latest_count,
+                yearly_breakdown=json.dumps(yearly),
+                top_problems=json.dumps(problems),
+            ),
+            fallback={},
+        )
+
+        direction = str(result.get("trend_direction", "")).strip().lower()
+        if direction not in self._VALID_DIRECTIONS:
+            # No heuristic fallback: without an agent verdict the trend is unknown.
+            self.last_backend = "anthropic"
+            self.last_fallback_reason = "Anthropic model returned no usable trend direction"
+            return self._not_available_summary(product_code)
+
+        self.last_backend = "anthropic"
+        self.last_fallback_reason = None
+        return TrendSummary(
+            product_code=product_code,
+            total_events=len(events),
+            software_problem_events=software_problem_events,
+            latest_year_events=latest_count,
+            previous_year_events=previous_count,
+            trend_direction=direction,
+            # Capture the model's justification instead of discarding it.
+            trend_rationale=str(result.get("rationale", "")).strip(),
+        )
+
+    def _aggregate(self, events: List[dict]) -> Tuple[int, int, int]:
+        """Deterministic counts used purely as context for the agent's judgment."""
+        year_counter: Counter = Counter()
+        software_problem_events = 0
+        for event in events:
+            date_received = str(event.get("date_received", ""))
+            if len(date_received) >= 4 and date_received[:4].isdigit():
+                year_counter[date_received[:4]] += 1
+            problems = " ".join(event.get("product_problems") or []).lower()
+            if any(term in problems for term in self.SOFTWARE_HINTS):
+                software_problem_events += 1
+
+        if year_counter:
+            years = sorted(year_counter.keys())
+            latest_count = year_counter[years[-1]]
+            previous_count = year_counter[years[-2]] if len(years) > 1 else year_counter[years[-1]]
+        else:
+            latest_count = 0
+            previous_count = 0
+        return software_problem_events, latest_count, previous_count
 
     @staticmethod
     def _not_available_summary(product_code: str) -> TrendSummary:
@@ -74,105 +176,6 @@ class ArchiveTrendAnalyzer:
             latest_year_events=0,
             previous_year_events=0,
             trend_direction="not_available",
-        )
-
-    def _summarize_internal(self, product_code: str, events: List[dict]) -> TrendSummary:
-        year_counter = Counter()
-        software_problem_events = 0
-
-        for event in events:
-            date_received = event.get("date_received", "")
-            if len(date_received) >= 4 and date_received[:4].isdigit():
-                year_counter[date_received[:4]] += 1
-
-            problems = " ".join(event.get("product_problems") or []).lower()
-            if any(term in problems for term in self.SOFTWARE_HINTS):
-                software_problem_events += 1
-
-        if year_counter:
-            years = sorted(year_counter.keys())
-            latest_year = years[-1]
-            previous_year = years[-2] if len(years) > 1 else years[-1]
-            latest_count = year_counter[latest_year]
-            previous_count = year_counter[previous_year]
-        else:
-            latest_count = 0
-            previous_count = 0
-
-        if latest_count > previous_count:
-            direction = "upward"
-        elif latest_count < previous_count:
-            direction = "downward"
-        else:
-            direction = "flat"
-
-        return TrendSummary(
-            product_code=product_code,
-            total_events=len(events),
-            software_problem_events=software_problem_events,
-            latest_year_events=latest_count,
-            previous_year_events=previous_count,
-            trend_direction=direction,
-        )
-
-    def _summarize_integrated(self, product_code: str, events: List[dict]) -> TrendSummary:
-        with _PIPELINE_LOCK:
-            self._pipeline.ingest_project_events({product_code: events})
-            try:
-                self._pipeline.run_extraction(batch_size=50, reflect=False, max_events=200)
-            except Exception:
-                pass
-            embeddings, report_numbers = self._pipeline.run_embedding(limit=0, batch_size=64)
-            self._pipeline.run_trend_analysis(embeddings, report_numbers)
-
-        year_counter = Counter()
-        software_problem_events = 0
-
-        docs: List[str] = []
-        for event in events:
-            date_received = str(event.get("date_received", ""))
-            if len(date_received) >= 4 and date_received[:4].isdigit():
-                year_counter[date_received[:4]] += 1
-
-            problems = " ".join(event.get("product_problems") or [])
-            narrative = str(event.get("narrative") or "")
-            combined = f"{problems} {narrative}".strip()
-            docs.append(combined if combined else "unknown event")
-
-            if any(term in problems.lower() for term in self.SOFTWARE_HINTS):
-                software_problem_events += 1
-
-        query_narrative = " ".join(docs)[:4000] if docs else ""
-        with _PIPELINE_LOCK:
-            similarity = self._pipeline.process_similarity(query_narrative)
-        cluster_size = int(similarity.get("cluster_size", 0))
-        growth_rate = float(similarity.get("growth_rate_30d", 0.0))
-
-        if year_counter:
-            years = sorted(year_counter.keys())
-            latest_year = years[-1]
-            previous_year = years[-2] if len(years) > 1 else years[-1]
-            latest_count = year_counter[latest_year]
-            previous_count = year_counter[previous_year]
-        else:
-            latest_count = 0
-            previous_count = 0
-
-        # Integrated semantics: combine temporal growth and cluster signal.
-        if (latest_count > previous_count and cluster_size >= max(3, len(events) // 10)) or growth_rate > 20:
-            direction = "upward"
-        elif latest_count < previous_count or growth_rate < -20:
-            direction = "downward"
-        else:
-            direction = "flat"
-
-        return TrendSummary(
-            product_code=product_code,
-            total_events=len(events),
-            software_problem_events=software_problem_events,
-            latest_year_events=latest_count,
-            previous_year_events=previous_count,
-            trend_direction=direction,
         )
 
     def yearly_breakdown(self, events: List[dict]) -> List[Dict[str, int]]:

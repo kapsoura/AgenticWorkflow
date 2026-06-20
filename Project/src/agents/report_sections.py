@@ -40,6 +40,7 @@ class ReportContext:
     report_questions: Optional[List[str]] = None
     subqueries: Optional[List[str]] = None
     quality_intelligence: Optional[List["object"]] = None
+    cluster: Optional[dict] = None
     review_needed: bool = False
     review_reasons: List[str] = field(default_factory=list)
 
@@ -116,16 +117,29 @@ def _regulatory_notification(ctx: ReportContext, orch) -> str:
 
 def _risk_assessment(ctx: ReportContext, orch) -> str:
     r = ctx.risk
-    return "\n".join(
-        [
-            f"- Severity: {r.severity_level}",
-            f"- Probability: {r.probability_level}",
-            f"- Risk Bucket: {r.risk_bucket}",
-            f"- Escalation Required: {r.escalation_required}",
-            f"- PRRC Notification Required: {r.prrc_notification_required}",
-            f"- ISO 14971 Rationale: {r.iso_14971_rationale}",
-        ]
-    )
+    lines = [
+        f"- Severity: {r.severity_level}",
+        f"- Probability: {r.probability_level}",
+        f"- Risk Bucket: {r.risk_bucket}",
+    ]
+    if r.hazardous_situation:
+        lines.append(f"- Hazardous Situation: {r.hazardous_situation}")
+    if r.harm:
+        lines.append(f"- Harm: {r.harm}")
+    lines.append(f"- Escalation Required: {r.escalation_required}")
+    lines.append(f"- PRRC Notification Required: {r.prrc_notification_required}")
+    if r.fsca_required:
+        lines.append(f"- FSCA Required: {r.fsca_required}")
+    lines.append(f"- ISO 14971 Rationale: {r.iso_14971_rationale}")
+    if r.uncertainty:
+        lines.append(f"- Uncertainty: {r.uncertainty}")
+    if r.evidence_basis:
+        lines.append("- Evidence Basis:")
+        for ev in r.evidence_basis[:6]:
+            lines.append(
+                f"  - [{ev.get('source')}] {ev.get('id')} — {ev.get('relevance', '')}"
+            )
+    return "\n".join(lines)
 
 
 def _evidence_precedent(ctx: ReportContext, orch) -> str:
@@ -163,26 +177,41 @@ def _quality_intelligence(ctx: ReportContext, orch) -> str:
 
 
 def _capa_plan(ctx: ReportContext, orch) -> str:
-    return "\n".join(
-        [
-            f"- CAPA Recommendation: {ctx.risk.capa_recommendation}",
-            f"- ISO 13485 Clauses: {', '.join(ctx.extraction.iso_13485_clauses) or 'None'}",
-        ]
-    )
+    r = ctx.risk
+    lines: List[str] = []
+    staged = [
+        ("Immediate Containment", r.capa_immediate),
+        ("Root-Cause Investigation", r.capa_investigation),
+        ("Corrective Action (ISO 13485 §8.5.2)", r.capa_corrective),
+        ("Preventive Action (ISO 13485 §8.5.3)", r.capa_preventive),
+        ("Verification", r.capa_verification),
+        ("Effectiveness Criteria", r.capa_effectiveness),
+    ]
+    populated = [(label, value) for label, value in staged if value]
+    if populated:
+        lines.extend(f"- {label}: {value}" for label, value in populated)
+        if r.capa_precedent:
+            lines.append(f"- CAPA Precedent: {r.capa_precedent}")
+    else:
+        lines.append(f"- CAPA Recommendation: {r.capa_recommendation}")
+    lines.append(f"- ISO 13485 Clauses: {', '.join(ctx.extraction.iso_13485_clauses) or 'None'}")
+    return "\n".join(lines)
 
 
 def _trend_context(ctx: ReportContext, orch) -> str:
     t = orch.ensure_trend(ctx)
     unavailable = str(t.trend_direction).strip().lower() == "not_available"
-    return "\n".join(
-        [
-            f"- Total Events in Working Archive: {'Not available' if unavailable else _na(t.total_events)}",
-            f"- Software-like Problem Events: {'Not available' if unavailable else _na(t.software_problem_events)}",
-            f"- Previous Year Event Count: {'Not available' if unavailable else _na(t.previous_year_events)}",
-            f"- Latest Year Event Count: {'Not available' if unavailable else _na(t.latest_year_events)}",
-            f"- Trend Direction: {'Not available' if unavailable else _na(t.trend_direction)}",
-        ]
-    )
+    lines = [
+        f"- Total Events in Working Archive: {'Not available' if unavailable else _na(t.total_events)}",
+        f"- Software-like Problem Events: {'Not available' if unavailable else _na(t.software_problem_events)}",
+        f"- Previous Year Event Count: {'Not available' if unavailable else _na(t.previous_year_events)}",
+        f"- Latest Year Event Count: {'Not available' if unavailable else _na(t.latest_year_events)}",
+        f"- Trend Direction: {'Not available' if unavailable else _na(t.trend_direction)}",
+    ]
+    rationale = getattr(t, "trend_rationale", "")
+    if not unavailable and rationale:
+        lines.append(f"- Trend Rationale: {rationale}")
+    return "\n".join(lines)
 
 
 def _monitoring_recommendation(ctx: ReportContext, orch) -> str:
@@ -205,6 +234,33 @@ def _orchestrator_questions(ctx: ReportContext, orch) -> str:
     if not questions:
         return "Not available"
     return "\n".join(f"- {q}" for q in questions)
+
+
+def _cluster_assignment(ctx: ReportContext, orch) -> str:
+    """Assign this complaint to a pre-built HDBSCAN reference cluster of prior FDA events."""
+    data = orch.ensure_cluster(ctx)
+    if not data:
+        return "Not available"
+    lines = [
+        f"- Assigned Cluster: {_na(data.get('cluster_label'))} (id {_na(data.get('cluster_id'))})",
+        f"- Cluster Size (prior similar events): {_na(data.get('cluster_size'))}",
+        f"- 30-Day Cluster Growth Rate: {_na(data.get('growth_rate_30d'))}%",
+        f"- Cluster Trend Flag: {_na(data.get('trend_flag'))}",
+    ]
+    similar = data.get("similar_events") or []
+    if similar:
+        lines.append("- Nearest Prior Events:")
+        for ev in similar[:5]:
+            score = ev.get("similarity_score")
+            score_s = f"{score:.2f}" if isinstance(score, (int, float)) else "n/a"
+            lines.append(
+                f"  - {_na(ev.get('report_number'))} (similarity {score_s}): {_na(ev.get('narrative_snippet'))}"
+            )
+    lines.append(
+        "- Note: cluster membership is similarity-based grouping of prior FDA events; "
+        "it supports pattern context and does not imply causation."
+    )
+    return "\n".join(lines)
 
 
 def _compliance_footer(ctx: ReportContext, orch) -> str:
@@ -307,6 +363,7 @@ SECTION_BUILDERS: Dict[str, Callable[[ReportContext, object], str]] = {
     "quality_intelligence": _quality_intelligence,
     "capa_plan": _capa_plan,
     "trend_context": _trend_context,
+    "cluster_assignment": _cluster_assignment,
     "monitoring_recommendation": _monitoring_recommendation,
     "orchestrator_questions": _orchestrator_questions,
     "compliance_footer": _compliance_footer,
@@ -324,6 +381,7 @@ REPORT_BLUEPRINTS: Dict[str, List[SectionSpec]] = {
         SectionSpec("executive_summary", "Executive Summary"),
         SectionSpec("extraction_details", "Device and Complaint Information"),
         SectionSpec("trend_context", "Trend Identification and Reporting"),
+        SectionSpec("cluster_assignment", "Similar-Signal Cluster Assignment"),
         SectionSpec("evidence_precedent", "Information about Similar Devices (FDA MAUDE)"),
         SectionSpec("quality_intelligence", "Quality Intelligence"),
         SectionSpec("risk_assessment", "Risk Assessment"),
@@ -338,6 +396,7 @@ REPORT_BLUEPRINTS: Dict[str, List[SectionSpec]] = {
         SectionSpec("regulatory_notification", "Regulatory Notification and FSCA"),
         SectionSpec("risk_assessment", "Risk Assessment"),
         SectionSpec("evidence_precedent", "Similar Incidents and Precedent"),
+        SectionSpec("cluster_assignment", "Similar-Signal Cluster Assignment"),
         SectionSpec("orchestrator_questions", "Decision Questions"),
         SectionSpec("compliance_footer", "Compliance Note"),
     ],
@@ -350,6 +409,7 @@ REPORT_BLUEPRINTS: Dict[str, List[SectionSpec]] = {
         SectionSpec("evidence_precedent", "Evidence and Precedent"),
         SectionSpec("quality_intelligence", "Root-Cause and Effectiveness Intelligence"),
         SectionSpec("trend_context", "Recurrence and Trend Context"),
+        SectionSpec("cluster_assignment", "Recurrence Cluster Assignment"),
         SectionSpec("capa_plan", "CAPA Plan"),
         SectionSpec("orchestrator_questions", "Investigation Questions"),
         SectionSpec("compliance_footer", "Compliance Note"),
@@ -435,6 +495,7 @@ SECTION_KEYWORDS: Dict[str, List[str]] = {
     "quality_intelligence": ["quality intelligence", "analytics", "pattern", "insight", "intelligence"],
     "capa_plan": ["capa", "corrective", "preventive", "action plan"],
     "trend_context": ["trend", "history", "statistic"],
+    "cluster_assignment": ["cluster", "grouping", "nearest", "signal cluster"],
     "monitoring_recommendation": ["monitoring", "recommendation", "surveillance", "pms plan", "updates to pms"],
     "orchestrator_questions": ["question", "decision", "follow-up", "follow up"],
     "compliance_footer": ["compliance", "disposition", "signature", "sign-off", "approval", "conclusion"],

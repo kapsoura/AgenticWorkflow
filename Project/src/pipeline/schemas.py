@@ -76,6 +76,9 @@ class TrendSummary:
     latest_year_events: int
     previous_year_events: int
     trend_direction: str
+    # One-sentence justification for the direction. Produced by the LLM (tool or
+    # JSON path) and surfaced in the report; empty when no model verdict is available.
+    trend_rationale: str = ""
 
 
 @dataclass

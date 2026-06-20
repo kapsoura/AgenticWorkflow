@@ -11,7 +11,7 @@ from src.utils.storage import embed_text
 
 EMBEDDINGS_DIR = RUNTIME_DIR / "signal_intelligence"
 EMBEDDINGS_FILE = EMBEDDINGS_DIR / "embeddings.npz"
-MODEL_NAME = "BAAI/bge-large-en-v1.5"
+MODEL_NAME = "BAAI/bge-small-en-v1.5"
 
 
 class EmbeddingGenerator:

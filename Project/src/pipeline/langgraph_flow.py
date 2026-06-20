@@ -6,6 +6,7 @@ from typing import Annotated, Dict, List, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from src.agents.archive_trend import ArchiveTrendAnalyzer
+from src.agents.cluster_assignment import ClusterAssignmentAgent
 from src.agents.extraction import ExtractionAgent
 from src.agents.orchestration import OrchestrationAgent
 from src.agents.report_generation import ReportGenerationAgent
@@ -68,12 +69,14 @@ class LangGraphSignalWorkflow:
         self.risk_agent = RiskAnalysisAgent()
         self.report_agent = ReportGenerationAgent()
         self.trend_agent = ArchiveTrendAnalyzer()
+        self.cluster_agent = ClusterAssignmentAgent()
         self.orchestrator_agent = OrchestrationAgent(
             extraction_agent=self.extraction_agent,
             retrieval_agent=self.retrieval_agent,
             risk_agent=self.risk_agent,
             report_agent=self.report_agent,
             trend_analyzer=self.trend_agent,
+            cluster_agent=self.cluster_agent,
         )
 
         self.graph = self._build_graph().compile()
@@ -266,18 +269,33 @@ class LangGraphSignalWorkflow:
                 "review_reasons": [],
             }
 
-        subqueries = self.orchestrator_agent.plan_subqueries(
-            complaint=complaint,
-            extraction=extraction,
-        )
-        retrieval = self.retrieval_agent.retrieve(
-            extracted=extraction,
-            complaint_product_code=complaint.product_code,
-            events_by_code=state["events_by_code"],
-            recalls=state["recalls"],
-            vector_collection=state.get("vector_collection"),
-            subqueries=subqueries,
-        )
+        # Preferred path: the model gathers evidence on demand via search tools.
+        retrieval: List[RetrievalEvidence] = []
+        subqueries: List[str] = []
+        if self.orchestrator_agent.tool_client.enabled:
+            retrieval = self.orchestrator_agent.gather_evidence(
+                complaint=complaint,
+                extraction=extraction,
+                events_by_code=state["events_by_code"],
+                recalls=state["recalls"],
+                vector_collection=state.get("vector_collection"),
+            )
+            subqueries = list(self.orchestrator_agent.last_evidence_queries)
+
+        # Deterministic fallback: plan subqueries + single fixed retrieve().
+        if not retrieval:
+            subqueries = self.orchestrator_agent.plan_subqueries(
+                complaint=complaint,
+                extraction=extraction,
+            )
+            retrieval = self.retrieval_agent.retrieve(
+                extracted=extraction,
+                complaint_product_code=complaint.product_code,
+                events_by_code=state["events_by_code"],
+                recalls=state["recalls"],
+                vector_collection=state.get("vector_collection"),
+                subqueries=subqueries,
+            )
         retrieval = [item for item in retrieval if item.score >= self.MIN_RETRIEVAL_SCORE]
         errors = validate_handoff("retrieval", retrieval)
 
@@ -293,7 +311,12 @@ class LangGraphSignalWorkflow:
             event="completed",
             gate_result="review" if review_reasons else "pass",
             latency_ms=(monotonic() - started) * 1000.0,
-            metadata={"kept_items": len(retrieval), "errors": errors},
+            metadata={
+                "kept_items": len(retrieval),
+                "errors": errors,
+                "subqueries": subqueries,
+                "tools_enabled": self.orchestrator_agent.tool_client.enabled,
+            },
         )
         return {
             "retrieval": retrieval,
@@ -321,6 +344,7 @@ class LangGraphSignalWorkflow:
                 "trend_direction": trend.trend_direction,
                 "backend": getattr(self.trend_agent, "last_backend", "integrated_unavailable"),
                 "fallback_reason": getattr(self.trend_agent, "last_fallback_reason", None),
+                "tool_calls": getattr(self.trend_agent, "last_tool_calls", []),
             },
         )
         return {"trend": trend, "trend_done": True}

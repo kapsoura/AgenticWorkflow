@@ -5,10 +5,10 @@ Generated: 2026-05-29
 
 | Dataset | Count |
 |---|---|
-| Medical Imaging Events (MRI+CT+Ultrasound+X-ray) | 2318 |
+| Medical Imaging Events (MRI+CT+Ultrasound+X-ray) | 2322 |
 | Molecular Diagnostics Events (Mol Dx+Hematology) | 1383 |
-| Total Adverse Events | 3701 |
-| Total Recalls | 3299 |
+| Total Adverse Events | 3705 |
+| Total Recalls | 3300 |
 
 ## 1. Data Quality Assessment
 
@@ -16,27 +16,27 @@ Generated: 2026-05-29
 
 | Field | Available | Percentage | Impact on Project |
 |-------|-----------|------------|-------------------|
-| mdr_text (narratives) | 3640/3701 | **98.4%** | CRITICAL - Input for extraction |
-| product_problems | 3640/3701 | 98.4% | HIGH - Ground truth labels |
-| patient data | 3700/3701 | 100.0% | MEDIUM - Severity assessment |
+| mdr_text (narratives) | 3618/3705 | **97.7%** | CRITICAL - Input for extraction |
+| product_problems | 3644/3705 | 98.4% | HIGH - Ground truth labels |
+| patient data | 3704/3705 | 100.0% | MEDIUM - Severity assessment |
 
 ### Narrative Statistics
 
-- Total narratives found: 3640
-- Average length: 836 chars
-- Median length: 563 chars
+- Total narratives found: 3618
+- Average length: 843 chars
+- Median length: 569 chars
 - Max length: 21510 chars
 - Min length: 32 chars
-- Events with narrative > 200 chars: 2982 (80.6%)
+- Events with narrative > 200 chars: 2961 (79.9%)
 
 ### Event Type Distribution
 
 | Type | Count | % |
 |---|---|---|
-| Malfunction | 2734 | 73.9% |
-| Injury | 860 | 23.2% |
+| Malfunction | 2740 | 74.0% |
+| Injury | 859 | 23.2% |
 | No answer provided | 52 | 1.4% |
-| Death | 41 | 1.1% |
+| Death | 40 | 1.1% |
 |  | 8 | 0.2% |
 | Other | 6 | 0.2% |
 
@@ -51,7 +51,7 @@ Generated: 2026-05-29
 | JAK | 500 | CT |
 | GKZ | 500 | Hematology |
 | MQB | 383 | Molecular Dx |
-| IZL | 319 | Digital X-ray |
+| IZL | 323 | Digital X-ray |
 | JJE | 2 | Other |
 | MOS | 1 | Other |
 | DRX | 1 | Other |
@@ -60,9 +60,9 @@ Generated: 2026-05-29
 
 | Manufacturer | Count |
 |---|---|
-| PHILIPS MEDICAL SYSTEMS DMC GMBH | 313 |
+| PHILIPS MEDICAL SYSTEMS DMC GMBH | 314 |
 |  | 292 |
-| PHILIPS MEDICAL SYSTEMS NEDERLAND B.V. | 245 |
+| PHILIPS MEDICAL SYSTEMS NEDERLAND B.V. | 259 |
 | BECTON, DICKINSON AND COMPANY, BD BIOSCIENCES | 216 |
 | BECKMAN COULTER | 194 |
 | ELEKTA SOLUTIONS AB | 179 |
@@ -75,18 +75,18 @@ Generated: 2026-05-29
 | ELEKTA INC | 93 |
 | ORTHO-CLINICAL DIAGNOSTICS | 89 |
 | UNK | 64 |
-| MERGE HEALTHCARE | 62 |
 | ROCHE DIAGNOSTICS | 57 |
 | VERAN MEDICAL TECHNOLOGIES, INC | 55 |
 | FUJIFILM HEALTHCARE CORPORATION | 53 |
 | ACCURAY INCORPORATED | 51 |
+| MERGE HEALTHCARE | 51 |
 
 ### Top 20 Brand Names
 
 | Brand | Count |
 |---|---|
 | MOSAIQ | 265 |
-| INTELLISPACE CARDIOVASCULAR | 195 |
+| INTELLISPACE CARDIOVASCULAR | 209 |
 | FC 500 FLOW CYTOMETER | 168 |
 | DIGITALDIAGNOST C90 HIGHPERFORMANCE | 100 |
 | DIGITALDIAGNOST 4.1 HIGH PERFORMANCE | 78 |
@@ -95,8 +95,8 @@ Generated: 2026-05-29
 | ILLUMISITE | 59 |
 | ELECSYS ANTI-SARS-COV-2 | 57 |
 | ADVIA CENTAUR XPT SARS-COV-2 TOTAL (COV2T) | 55 |
-| MERGE CARDIO | 52 |
 | SUPERDIMENSION | 51 |
+| MERGE CARDIO | 49 |
 | REVOLUTION CT | 46 |
 | VITROS IMMUNODIAGNOSTIC PRODUCTS ANTI-SARS-COV2 IGG REAGENT PACK | 39 |
 | SYNAPSE PACS | 38 |
@@ -104,7 +104,7 @@ Generated: 2026-05-29
 | ATELLICA IM SARS-COV-2 TOTAL (COV2T) | 37 |
 | ADVIA CENTAUR SARS-COV-2 TOTAL (COV2T) | 36 |
 | BD FACSCANTO II FLOW CYTOMETER | 35 |
-| MERGE UNITY PACS | 33 |
+| GM85 | 31 |
 
 ### Product Problems — Software Relevance Analysis
 
@@ -112,7 +112,7 @@ Generated: 2026-05-29
 |---|---|---|
 | Computer Software Problem | 401 | ✅ YES |
 | Incorrect, Inadequate or Imprecise Result or Readings | 388 | ✅ YES |
-| Adverse Event Without Identified Device or Use Problem | 259 |  |
+| Adverse Event Without Identified Device or Use Problem | 258 |  |
 | Device Handling Problem | 253 |  |
 | Device Fell | 234 |  |
 | False Positive Result | 215 |  |
@@ -121,27 +121,27 @@ Generated: 2026-05-29
 | Insufficient Device Problem Information | 161 |  |
 | False Negative Result | 157 |  |
 | Fluid/Blood Leak | 151 |  |
-| Application Program Problem | 139 | ✅ YES |
+| Application Program Problem | 141 | ✅ YES |
 | Detachment of Device or Device Component | 122 |  |
 | Unintended System Motion | 72 |  |
+| Failure to Transmit Record | 63 | ✅ YES |
 | Unintended Movement | 57 |  |
-| Failure to Transmit Record | 56 | ✅ YES |
+| No Display/Image | 57 | ✅ YES |
 | Break | 53 |  |
-| No Display/Image | 53 | ✅ YES |
 | Device Operational Issue | 53 |  |
-| Sharp Edges | 47 |  |
+| Sharp Edges | 48 |  |
 | Application Program Problem: Parameter Calculation Error | 47 | ✅ YES |
 | No Apparent Adverse Event | 46 |  |
-| Poor Quality Image | 43 | ✅ YES |
-| Loss of Data | 42 | ✅ YES |
+| Poor Quality Image | 42 | ✅ YES |
 | Patient Data Problem | 40 | ✅ YES |
 | Device Displays Incorrect Message | 35 | ✅ YES |
+| Loss of Data | 34 | ✅ YES |
 | Therapeutic or Diagnostic Output Failure | 31 |  |
 | Smoking | 30 |  |
 | Output Problem | 28 |  |
 | Electrical /Electronic Property Problem | 26 |  |
 
-**Software-related problems: 1656/4604 (36.0%)**
+**Software-related problems: 1660/4610 (36.0%)**
 
 ## 2. Recall Data Analysis
 
@@ -149,16 +149,16 @@ Generated: 2026-05-29
 
 | Field | Available | % | Project Use |
 |---|---|---|---|
-| reason_for_recall | 3299/3299 | 100.0% | CAPA ground truth |
-| action | 3295/3299 | 99.9% | Corrective action examples |
-| root_cause_description | 3299/3299 | 100.0% | Root cause classification |
+| reason_for_recall | 3300/3300 | 100.0% | CAPA ground truth |
+| action | 3296/3300 | 99.9% | Corrective action examples |
+| root_cause_description | 3300/3300 | 100.0% | Root cause classification |
 
 ### Root Cause Distribution
 
 | Root Cause | Count | % |
 |---|---|---|
 | Software design | 1076 | 32.6% |
-| Device Design | 465 | 14.1% |
+| Device Design | 466 | 14.1% |
 | Other | 397 | 12.0% |
 | Under Investigation by firm | 280 | 8.5% |
 | Nonconforming Material/Component | 195 | 5.9% |
@@ -209,17 +209,17 @@ Generated: 2026-05-29
 | Term | Count |
 |---|---|
 | PHILIPS ELECTRONICS NEDERLAND B.V. | 1,094 |
-| PHILIPS MEDICAL SYSTEMS NEDERLAND B.V. | 428 |
-| SIEMENS HEALTHINEERS AG | 91 |
-| GE MEDICAL SYSTEMS, LLC | 69 |
+| PHILIPS MEDICAL SYSTEMS NEDERLAND B.V. | 460 |
+| SIEMENS HEALTHINEERS AG | 92 |
+| GE MEDICAL SYSTEMS, LLC | 70 |
 | FUJIFILM HEALTHCARE CORPORATION | 54 |
-| UNK | 39 |
-| GE HEALTHCARE (TIANJIN) COMPANY LIMITED | 27 |
+| UNK | 40 |
+| GE HEALTHCARE (TIANJIN) COMPANY LIMITED | 28 |
+| UNKNOWN | 24 |
 | SIEMENS HEALTHCARE GMBH - MR | 23 |
-| UNKNOWN | 23 |
 | FUJIFILM CORPORATION | 18 |
 | SIEMENS HEALTHCARE GMBH | 18 |
-| CANON MEDICAL SYSTEMS CORPORATION | 17 |
+| CANON MEDICAL SYSTEMS CORPORATION | 16 |
 | GE HEALTHCARE MANUFACTURING LLC | 10 |
 | IMRIS - DEERFIELD IMAGING, INC. | 9 |
 | SIEMENS SHENZHEN MAGNETIC RESONANCE LTD. | 9 |
@@ -228,21 +228,21 @@ Generated: 2026-05-29
 
 | Term | Count |
 |---|---|
-| COVIDIEN LP - SUPERDIMENSION INC | 388 |
+| COVIDIEN LP - SUPERDIMENSION INC | 396 |
 | VERAN MEDICAL TECHNOLOGIES, INC. | 71 |
+| SIEMENS HEALTHINEERS AG | 59 |
 | SIEMENS HEALTHCARE GMBH | 58 |
 | VERAN MEDICAL TECHNOLOGIES, INC | 55 |
-| SIEMENS HEALTHINEERS AG | 54 |
 | NEUROLOGICA CORP | 53 |
 | PHILIPS MEDICAL SYSTEMS NEDERLAND B.V. | 44 |
 | SIEMENS HEALTHCARE GMBH-CT | 43 |
-| PHILIPS HEALTHCARE (SUZHOU) CO., LTD. | 30 |
+| PHILIPS HEALTHCARE (SUZHOU) CO., LTD. | 31 |
 |  | 27 |
 | NEUROLOGICA CORPORATION | 22 |
 | GE MEDICAL SYSTEMS, LLC | 17 |
+| SAMSUNG HME AMERICA, INC. | 12 |
 | SIEMENS MEDICAL SOLUTIONS USA, INC. | 12 |
 | GE HANGWEI MEDICAL SYSTEMS CO., LTD. | 11 |
-| SIEMENS SHANGHAI, MEDICAL EQUIPMENT LTD. | 11 |
 
 ### Recall Roots Imaging
 
@@ -270,7 +270,7 @@ Generated: 2026-05-29
 |---|---|
 | Other | 88 |
 | Software design | 82 |
-| Device Design | 75 |
+| Device Design | 76 |
 | Under Investigation by firm | 36 |
 | Nonconforming Material/Component | 35 |
 | Process control | 22 |
@@ -288,41 +288,41 @@ Generated: 2026-05-29
 
 | Term | Count |
 |---|---|
-| ACHIEVA 1.5T DSTREAM | 341 |
-| ACHIEVA 1.5T NEW | 225 |
-| INGENIA | 165 |
+| ACHIEVA 1.5T DSTREAM | 348 |
+| ACHIEVA 1.5T NEW | 228 |
+| INGENIA | 184 |
 | ACHIEVA 3.0T DSTREAM | 105 |
 | INGENIA 3.0T | 84 |
 | ACHIEVA 1.5T NOVA | 83 |
-| ACHIEVA 3.0T TX | 69 |
+| ACHIEVA 3.0T TX | 70 |
 | ACHIEVA 3.0 T | 57 |
 | INGENIA 1.5T | 56 |
 | ACHIEVA 3.0T NEW | 38 |
-| INTERA 1.5T PULSAR NEW | 33 |
+| INTERA 1.5T PULSAR NEW | 34 |
 | ACHIEVA 1.5T | 31 |
 | ACHIEVA 1.5T CONVERSION | 29 |
 | SMARTPATH TO DSTREAM FOR XR AND 3.0T | 29 |
-| MRI | 26 |
+| MRI | 27 |
 
 ### Brand Names Jak
 
 | Term | Count |
 |---|---|
-| ILLUMISITE | 308 |
+| ILLUMISITE | 316 |
 | SUPERDIMENSION | 48 |
+| SOMATOM DEFINITION AS | 33 |
 |  | 31 |
-| SOMATOM DEFINITION AS | 31 |
 | EDGE | 27 |
+| NL5000 | 27 |
 | INCISIVE CT | 26 |
-| NL5000 | 25 |
-| SOMATOM FORCE | 23 |
+| SOMATOM FORCE | 24 |
 | SOMATOM DEFINITION FLASH | 18 |
 | BRILLIANCE | 14 |
+| NL3000 | 14 |
 | NL4000 | 13 |
 | SOMATOM DRIVE | 13 |
 | ALWAYS-ON TIP TRACKED 22GA ANSO FLEXIBLE NEEDLE | 12 |
-| ALWAYS-ON TIP TRACKED TRIPLE NEEDLE BRUSH | 11 |
-| BRILLIANCE ICT | 11 |
+| SOMATOM X.CITE | 12 |
 
 ## 4. BLOCKERS & RISKS
 

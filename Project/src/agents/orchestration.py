@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
+from src.agents.agent_tools import quality_tool_specs, retrieval_tool_specs
 from src.agents.archive_trend import ArchiveTrendAnalyzer
 from src.agents.extraction import ExtractionAgent
 from src.agents.quality_tools import QualityAnalyticsToolbox, ToolResult
@@ -10,6 +11,7 @@ from src.agents.retrieval import RetrievalAgent
 from src.agents.risk_analysis import RiskAnalysisAgent
 from src.pipeline.schemas import Complaint, ExtractedSignal, RetrievalEvidence, RiskAssessment, TrendSummary
 from src.utils.prompt_store import render_prompt
+from src.utils.tool_loop import AnthropicToolClient
 
 # Report type -> quality-intelligence themes the toolbox should run for that report.
 REPORT_THEME_MAP = {
@@ -34,6 +36,13 @@ class OrchestrationAgent:
     report_agent: ReportGenerationAgent
     trend_analyzer: ArchiveTrendAnalyzer
     toolbox: QualityAnalyticsToolbox = field(default_factory=QualityAnalyticsToolbox)
+    cluster_agent: "object | None" = None
+    # Real Anthropic tool-use client; when disabled (no ANTHROPIC_API_KEY) every
+    # tool-driven path below falls back to the deterministic behaviour.
+    tool_client: AnthropicToolClient = field(default_factory=AnthropicToolClient)
+    # Search queries the model issued during the last tool-driven evidence gather
+    # (surfaced as "subqueries" in the trace).
+    last_evidence_queries: List[str] = field(default_factory=list)
 
     # --- Report-set decision (drives which reports are generated) ----------
     def decide_report_types(
@@ -93,6 +102,15 @@ class OrchestrationAgent:
             )
         return ctx.trend
 
+    def ensure_cluster(self, ctx: ReportContext) -> dict:
+        """Assign the complaint to a pre-built HDBSCAN cluster (lazy, cached on ctx)."""
+        if ctx.cluster is None:
+            if self.cluster_agent is None:
+                ctx.cluster = {}
+            else:
+                ctx.cluster = self.cluster_agent.assign(ctx.complaint.narrative) or {}
+        return ctx.cluster
+
     def ensure_subqueries(self, ctx: ReportContext) -> List[str]:
         if ctx.subqueries is None:
             if str(ctx.extraction.qms_complaint_category).strip().upper() == "NOT_AVAILABLE" or ctx.extraction.confidence <= 0.0:
@@ -103,6 +121,19 @@ class OrchestrationAgent:
 
     def ensure_evidence(self, ctx: ReportContext) -> List[RetrievalEvidence]:
         if ctx.retrieval is None:
+            # Preferred path: let the model search the archive on demand via tools.
+            if self.tool_client.enabled:
+                evidence = self.gather_evidence(
+                    complaint=ctx.complaint,
+                    extraction=ctx.extraction,
+                    events_by_code=ctx.events_by_code,
+                    recalls=[],
+                    report_type=ctx.report_type,
+                )
+                if evidence:
+                    ctx.retrieval = evidence
+                    return ctx.retrieval
+            # Deterministic fallback: single fixed retrieve() over planned subqueries.
             ctx.retrieval = self.retrieval_agent.retrieve(
                 extracted=ctx.extraction,
                 complaint_product_code=ctx.complaint.product_code,
@@ -118,14 +149,107 @@ class OrchestrationAgent:
                 ctx.quality_intelligence = []
                 return ctx.quality_intelligence
             events = ctx.events_by_code.get(ctx.complaint.product_code, [])
+            retrieved_count = len(self.ensure_evidence(ctx))
+
+            # Preferred path: the model chooses which analyses to run as tools.
+            if self.tool_client.enabled:
+                results = self._quality_intelligence_via_tools(ctx, events, retrieved_count)
+                if results:
+                    ctx.quality_intelligence = results
+                    return ctx.quality_intelligence
+
+            # Deterministic fallback: run the theme-mapped analyses offline.
             themes = REPORT_THEME_MAP.get(ctx.report_type)
             ctx.quality_intelligence = self.toolbox.run_for_themes(
                 events=events,
                 key_issues=ctx.extraction.key_issues,
-                retrieved_count=len(self.ensure_evidence(ctx)),
+                retrieved_count=retrieved_count,
                 themes=themes,
             )
         return ctx.quality_intelligence
+
+    # --- Tool-driven helpers (real Anthropic tool use) ---------------------
+    def _quality_intelligence_via_tools(
+        self, ctx: ReportContext, events: List[dict], retrieved_count: int
+    ) -> List[ToolResult]:
+        """Let the model pick and run the analytics tools relevant to this report.
+
+        Returns the ``ToolResult``s the model actually invoked (empty on failure,
+        so the caller falls back to the deterministic theme map).
+        """
+        specs, captured = quality_tool_specs(
+            self.toolbox, events, ctx.extraction.key_issues, retrieved_count
+        )
+        recommended = REPORT_THEME_MAP.get(ctx.report_type) or []
+        try:
+            self.tool_client.run(
+                system_prompt=render_prompt("quality_intel_system"),
+                user_prompt=render_prompt(
+                    "quality_intel_user",
+                    product_code=ctx.complaint.product_code,
+                    report_type=ctx.report_type,
+                    category=ctx.extraction.qms_complaint_category,
+                    key_issues=", ".join(ctx.extraction.key_issues) or "None",
+                    recommended_themes=", ".join(recommended) if recommended else "any",
+                    retrieved_count=retrieved_count,
+                    total_events=len(events),
+                ),
+                tools=specs,
+                max_tokens=900,
+            )
+        except Exception:  # noqa: BLE001 — fall back to the deterministic path
+            return []
+        return captured
+
+    def gather_evidence(
+        self,
+        complaint: Complaint,
+        extraction: ExtractedSignal,
+        events_by_code,
+        recalls: "List[dict] | None" = None,
+        vector_collection=None,
+        report_type: str = "signal review",
+        top_k: int = 5,
+    ) -> List[RetrievalEvidence]:
+        """Model-driven evidence gathering: the model searches MAUDE/recalls via tools.
+
+        Returns the deduped, score-sorted evidence the model surfaced (empty when
+        the tool client is disabled or errors, so callers use the fixed retrieve()).
+        Records the issued search queries on ``last_evidence_queries`` for tracing.
+        """
+        self.last_evidence_queries = []
+        if not self.tool_client.enabled:
+            return []
+        specs, captured = retrieval_tool_specs(
+            self.retrieval_agent,
+            complaint.product_code,
+            events_by_code,
+            recalls or [],
+            vector_collection,
+        )
+        try:
+            result = self.tool_client.run(
+                system_prompt=render_prompt("retrieval_tools_system"),
+                user_prompt=render_prompt(
+                    "retrieval_tools_user",
+                    product_code=complaint.product_code,
+                    report_type=report_type,
+                    category=extraction.qms_complaint_category,
+                    key_issues=", ".join(extraction.key_issues) or "None",
+                    narrative=complaint.narrative[:600],
+                ),
+                tools=specs,
+                max_tokens=900,
+            )
+        except Exception:  # noqa: BLE001 — fall back to the deterministic retrieve()
+            return []
+        self.last_evidence_queries = [
+            str(inv.arguments.get("query", "")).strip()
+            for inv in result.invocations
+            if inv.name == "search_maude_events" and inv.arguments.get("query")
+        ]
+        captured.sort(key=lambda item: item.score, reverse=True)
+        return captured[:top_k]
 
     def ensure_questions(self, ctx: ReportContext) -> List[str]:
         if ctx.report_questions is None:
