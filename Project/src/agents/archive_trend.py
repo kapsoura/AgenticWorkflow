@@ -2,22 +2,23 @@ import json
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-from src.agents.agent_tools import trend_tool_specs
+from src.tools.agent_tools import trend_tool_specs
 from src.pipeline.schemas import TrendSummary
 from src.utils.llm_client import AnthropicClient
 from src.utils.prompt_store import render_prompt
-from src.utils.tool_loop import AnthropicToolClient
+from src.tools.tool_loop import AnthropicToolClient
 
 
 class ArchiveTrendAnalyzer:
     """Per-code trend assessment routed through Anthropic.
 
-    Preferred path: real Anthropic tool use — the model calls read-only tools
-    (yearly counts, top problems) to inspect the archive, then commits to a trend
-    DIRECTION and rationale. Falls back to the ``claude -p`` JSON path when no
-    ANTHROPIC_API_KEY is set. There is **no heuristic fallback** — if neither
-    backend is enabled or the model returns nothing usable, the summary is
-    NOT_AVAILABLE so the report flags it for human review.
+    Preferred path: real Anthropic tool use over the ``claude`` CLI — the model
+    calls read-only tools (yearly counts, top problems) to inspect the archive,
+    then commits to a trend DIRECTION and rationale. Falls back to the ``claude -p``
+    JSON path. Both run through the CLI (``CLAUDE_CLI_PATH``); no API key is needed.
+    There is **no heuristic fallback** — if neither backend is enabled or the model
+    returns nothing usable, the summary is NOT_AVAILABLE so the report flags it for
+    human review.
     """
 
     SOFTWARE_HINTS = ("software", "application", "algorithm", "image", "dicom")
@@ -35,8 +36,7 @@ class ArchiveTrendAnalyzer:
         else:
             self.last_backend = "unavailable"
             self.last_fallback_reason = (
-                "No Anthropic backend enabled (set ANTHROPIC_API_KEY for tools or "
-                "CLAUDE_CLI_PATH for the CLI in .env)"
+                "No Anthropic backend enabled (set CLAUDE_CLI_PATH for the claude CLI in .env)"
             )
 
     def summarize(self, product_code: str, events: List[dict]) -> TrendSummary:
@@ -66,7 +66,7 @@ class ArchiveTrendAnalyzer:
         if not self.tool_client.enabled and not self.llm.enabled:
             self.last_backend = "unavailable"
             self.last_fallback_reason = (
-                "No Anthropic backend enabled (set ANTHROPIC_API_KEY or CLAUDE_CLI_PATH in .env)"
+                "No Anthropic backend enabled (set CLAUDE_CLI_PATH in .env)"
             )
         return self._not_available_summary(product_code)
 

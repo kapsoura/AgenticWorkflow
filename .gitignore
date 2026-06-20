@@ -30,3 +30,17 @@ Project/.env
 Project/CLAUDE.md
 Project/.langgraph_api/.langgraph_ops.pckl
 Project/data/analysis/data_analysis_report.md
+
+# --- Local additions (preserved from pre-pull untracked .gitignore) ---
+/.venv
+.venv-1/
+/01_DA225o_2026_Week01_02_v1.pdf
+/02b_ClaudeCode_SDD_Lecture.pdf
+/03_DA225o_2026_Week03.pdf
+/requirements.txt
+/Tutorial-1
+**/__pycache__/
+**/*.pyc
+llm-evals-kapsoura-main/*
+AgenticWorkflow-Mohammad_Ayan_Khan_Data_Extraction/*
+AgenticWorkflow-Sai_Venkat_RetrievalAgent/*

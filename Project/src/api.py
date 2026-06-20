@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Regulatory Signal Intelligence API",
+    title="Multi-Agent-Quality-Intelligence API",
     version="0.4.0",
     lifespan=lifespan,
 )
@@ -55,7 +55,7 @@ class WorkflowRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "signal-workflow"}
+    return {"status": "ok", "service": "multi-agent-quality-intelligence"}
 
 
 @app.post("/run")

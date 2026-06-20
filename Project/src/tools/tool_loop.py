@@ -3,11 +3,13 @@
 A small, reusable agentic loop built on the official ``anthropic`` SDK so agents
 can expose plain Python functions as **model-callable tools**.
 
-This is the real-tool-use path (chosen deliberately over the offline ``claude -p``
-bridge in ``custom_anthropic_client.py``). It requires ``ANTHROPIC_API_KEY``; when
-that key is absent the client reports ``enabled == False`` and every caller is
-expected to fall back to its deterministic/heuristic behaviour, so the rest of the
-system keeps running offline exactly as before.
+This is the real-tool-use path, driven entirely through the ``claude`` CLI bridge
+in ``custom_anthropic_client.py`` (no ``ANTHROPIC_API_KEY`` required). The CLI
+client emulates the Messages tool-use contract, returning the same duck-typed
+response (``stop_reason`` + ``tool_use``/``text`` blocks) this loop consumes. When
+the CLI is unavailable (``CLAUDE_CLI_PATH`` unset) the client reports
+``enabled == False`` and every caller falls back to its deterministic/heuristic
+behaviour, so the rest of the system keeps running offline exactly as before.
 
 Usage:
 
@@ -28,14 +30,12 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from time import monotonic
 from typing import Any, Callable, Dict, List
 
 from dotenv import load_dotenv
 
-try:  # The SDK is optional at import time so offline installs still load.
-    import anthropic
-except Exception:  # pragma: no cover - exercised only when the dep is missing
-    anthropic = None
+from src.utils.custom_anthropic_client import CustomAnthropicClient
 
 load_dotenv()
 
@@ -109,17 +109,22 @@ def _stringify(value: Any) -> str:
 
 
 class AnthropicToolClient:
-    """Runs an Anthropic tool-use loop, or stays disabled when no key is set."""
+    """Runs an Anthropic tool-use loop over the ``claude`` CLI, or stays disabled
+    when the CLI is not configured (``CLAUDE_CLI_PATH`` unset)."""
 
-    def __init__(self, model: str | None = None, max_iterations: int = 8):
+    def __init__(self, model: str | None = None, max_iterations: int = 8, time_budget_s: float = 45.0):
         self.model = model or os.environ.get("ANTHROPIC_TOOL_MODEL", _DEFAULT_MODEL)
         self.max_iterations = max_iterations
+        # Wall-clock cap for the whole loop. Stopping is deterministic (time +
+        # iteration count), never the model's self-assessment — mirrors the
+        # architecture's loop-safety rule. Whatever tools ran before the cap is
+        # still returned, so callers degrade gracefully to partial/empty results.
+        self.time_budget_s = time_budget_s
         self._client = None
-        if anthropic is not None and os.environ.get("ANTHROPIC_API_KEY"):
-            try:
-                self._client = anthropic.Anthropic()
-            except Exception:
-                self._client = None
+        try:
+            self._client = CustomAnthropicClient()
+        except Exception:
+            self._client = None
 
     @property
     def enabled(self) -> bool:
@@ -139,15 +144,20 @@ class AnthropicToolClient:
         and use their deterministic fallback (mirrors ``complete_json``'s contract).
         """
         if self._client is None:
-            raise RuntimeError("AnthropicToolClient is disabled (ANTHROPIC_API_KEY not set)")
+            raise RuntimeError("AnthropicToolClient is disabled (CLAUDE_CLI_PATH not set)")
 
         registry = {spec.name: spec for spec in tools}
         tool_defs = [spec.to_api() for spec in tools]
         messages: List[Dict[str, Any]] = [{"role": "user", "content": user_prompt}]
         invocations: List[ToolInvocation] = []
         stop_reason = ""
+        deadline = monotonic() + self.time_budget_s
 
         for iteration in range(1, self.max_iterations + 1):
+            # Deterministic stop: out of time budget. Return what ran so far so
+            # the caller falls back / uses partial evidence instead of hanging.
+            if monotonic() >= deadline:
+                return ToolLoopResult("", invocations, stop_reason or "time_budget", iteration - 1)
             response = self._client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,

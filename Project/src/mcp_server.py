@@ -9,7 +9,7 @@ except Exception:  # pragma: no cover
 
 
 if FastMCP is not None:
-    mcp = FastMCP("signal-workflow")
+    mcp = FastMCP("multi-agent-quality-intelligence")
 
     @mcp.tool()
     def run_signal_workflow(

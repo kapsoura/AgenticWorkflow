@@ -2,7 +2,7 @@
 
 Each builder turns existing deterministic Python functions into ``ToolSpec``
 objects the model can call through ``AnthropicToolClient`` (see
-``utils/tool_loop.py``). Runtime context the model must NOT choose (the event
+``tools/tool_loop.py``). Runtime context the model must NOT choose (the event
 archive, the active product code, recall records) is bound by closure, so the
 schema the model sees only exposes the genuine decision arguments.
 
@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from src.agents.quality_tools import QualityAnalyticsToolbox, ToolResult
+from src.tools.quality_tools import QualityAnalyticsToolbox, ToolResult
 from src.pipeline.schemas import ExtractedSignal, RetrievalEvidence
-from src.utils.tool_loop import ToolSpec
+from src.tools.tool_loop import ToolSpec
 
 # Tools whose only inputs are bound by closure expose an empty argument schema.
 _NO_ARGS = {"type": "object", "properties": {}, "additionalProperties": False}

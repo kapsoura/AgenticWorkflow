@@ -1,17 +1,17 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-from src.agents.agent_tools import quality_tool_specs, retrieval_tool_specs
+from src.tools.agent_tools import quality_tool_specs, retrieval_tool_specs
 from src.agents.archive_trend import ArchiveTrendAnalyzer
 from src.agents.extraction import ExtractionAgent
-from src.agents.quality_tools import QualityAnalyticsToolbox, ToolResult
+from src.tools.quality_tools import QualityAnalyticsToolbox, ToolResult
 from src.agents.report_generation import ReportGenerationAgent
 from src.agents.report_sections import ReportContext, blueprint_for, SECTION_BUILDERS
 from src.agents.retrieval import RetrievalAgent
 from src.agents.risk_analysis import RiskAnalysisAgent
 from src.pipeline.schemas import Complaint, ExtractedSignal, RetrievalEvidence, RiskAssessment, TrendSummary
 from src.utils.prompt_store import render_prompt
-from src.utils.tool_loop import AnthropicToolClient
+from src.tools.tool_loop import AnthropicToolClient
 
 # Report type -> quality-intelligence themes the toolbox should run for that report.
 REPORT_THEME_MAP = {
@@ -37,8 +37,9 @@ class OrchestrationAgent:
     trend_analyzer: ArchiveTrendAnalyzer
     toolbox: QualityAnalyticsToolbox = field(default_factory=QualityAnalyticsToolbox)
     cluster_agent: "object | None" = None
-    # Real Anthropic tool-use client; when disabled (no ANTHROPIC_API_KEY) every
-    # tool-driven path below falls back to the deterministic behaviour.
+    # Real Anthropic tool-use client over the claude CLI; when disabled (no
+    # CLAUDE_CLI_PATH) every tool-driven path below falls back to the
+    # deterministic behaviour.
     tool_client: AnthropicToolClient = field(default_factory=AnthropicToolClient)
     # Search queries the model issued during the last tool-driven evidence gather
     # (surfaced as "subqueries" in the trace).
