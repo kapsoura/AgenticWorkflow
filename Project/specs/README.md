@@ -26,6 +26,8 @@ This directory decomposes the Multi-Agent Regulatory Signal Intelligence System 
 | [US-16](US-16-evaluation-harness.md) | Evaluation harness (outcome+trajectory) | D. Evaluation | M6 | 3–4 | P0 |
 | [US-17](US-17-dpo-alignment.md) | DPO alignment study | D. Evaluation | M5 | 3 | P1 |
 | [US-18](US-18-ablation-studies.md) | Ablation studies | D. Evaluation | M6 | 4 | P1 |
+| [US-19](US-19-memory-parallel-guardrails.md) | Memory + parallel + explicit guardrails | C. Integration | M2 | 3-4 | P0 |
+| [US-20](US-20-structured-extraction-clustering-integration.md) | Integrate structured extraction + clustering | C. Integration | M2+M3+M4 | 4 | P1 |
 
 Priority: **P0** = critical path (system doesn't work without it) · **P1** = important · **P2** = enhancement / stretch.
 
@@ -66,3 +68,8 @@ These come from the agentic-AI audit and the QMS framework; each spec restates t
 ## Spec Template
 
 Each spec follows: metadata table → User Story → Context → Scope → Inputs/Outputs → Acceptance Criteria → Technical Approach → Dependencies → Test Plan → Definition of Done.
+
+## Current Build Snapshot
+
+- [SPEC-V1-5-agent-workflow.md](SPEC-V1-5-agent-workflow.md): executable baseline for the fixed 3-product, 5-agent workflow with LangGraph orchestration.
+- [COVERAGE-US01-US18.md](COVERAGE-US01-US18.md): explicit coverage matrix and contradiction check against the full US-01..US-18 plan.
