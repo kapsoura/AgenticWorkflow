@@ -199,6 +199,26 @@ context, CAPA/monitoring guidance, decision questions, and a compliance footer.
 The matching `Project/logs/<trace_id>.jsonl` records per-agent latency, gate results, and
 which sections were built — useful for observability and debugging.
 
+### Optional — LangSmith tracing
+
+The pipeline is a LangGraph workflow, so it can export full trace trees to
+[LangSmith](https://smith.langchain.com) (one span per node, with the Claude calls
+nested as `llm` spans). Tracing is **off by default**; the local `.jsonl` trace always
+works without it.
+
+To enable, add to `Project/.env` (get a free key at smith.langchain.com — never commit it):
+
+```bash
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=<your key>
+LANGCHAIN_PROJECT=regulatory-signal-intelligence
+```
+
+On the next run the console prints `[langsmith] tracing enabled -> project '...'` and each
+run appears in LangSmith named by its `trace_id`, so the cloud trace and the local
+`logs/<trace_id>.jsonl` line up one-to-one. If the key or package is missing, tracing is
+skipped with a notice and the run continues normally.
+
 ---
 
 ## 9. Project layout

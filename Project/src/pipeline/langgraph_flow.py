@@ -14,6 +14,7 @@ from src.agents.retrieval import RetrievalAgent
 from src.agents.risk_analysis import RiskAnalysisAgent
 from src.agents.report_sections import ReportContext
 from src.config import SQLITE_DB_PATH
+from src.observability.langsmith_tracing import configure_langsmith, run_metadata
 from src.observability.tracer import TraceLogger
 from src.pipeline.schemas import Complaint, RetrievalEvidence, validate_handoff
 from src.utils.storage import embed_text
@@ -64,6 +65,9 @@ class LangGraphSignalWorkflow:
     _UNSUPPORTED_CLAIM_TERMS = ("guaranteed", "definitive", "certain", "proven")
 
     def __init__(self):
+        # Export LangSmith env (no-op unless enabled in .env) before the graph is
+        # built so every subsequent invoke is auto-traced to LangSmith.
+        configure_langsmith()
         self.extraction_agent = ExtractionAgent()
         self.retrieval_agent = RetrievalAgent()
         self.risk_agent = RiskAnalysisAgent()
@@ -584,7 +588,11 @@ class LangGraphSignalWorkflow:
                 "input_guardrail_reasons": [],
                 "output_guardrail_pass": True,
                 "output_guardrail_reasons": [],
-            }
+            },
+            config=run_metadata(
+                trace_id,
+                {"product_code": complaint.product_code, "complaint_id": complaint.complaint_id},
+            ),
         )
         return result.get("signal_reports", [])
 

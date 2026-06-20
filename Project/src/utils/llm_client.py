@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 from dotenv import load_dotenv
 
+from src.observability.langsmith_tracing import traceable_llm
 from src.utils.custom_anthropic_client import CustomAnthropicClient
 
 load_dotenv()
@@ -35,6 +36,7 @@ class AnthropicClient:
     def enabled(self) -> bool:
         return self._client is not None
 
+    @traceable_llm(name="claude.complete_json")
     def complete_json(self, system_prompt: str, user_prompt: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
         if not self._client:
             return fallback
@@ -68,7 +70,10 @@ class AnthropicClient:
         """
         if not self._client:
             return fallback
+        return self._complete_text(system_prompt, user_prompt, fallback)
 
+    @traceable_llm(name="claude.complete_text")
+    def _complete_text(self, system_prompt: str, user_prompt: str, fallback: str = "") -> str:
         try:
             response = self._client.messages.create(
                 max_tokens=4000,
