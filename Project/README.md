@@ -1,4 +1,4 @@
-# Regulatory Signal Intelligence — Agentic Workflow
+# Multi-Agent-Quality-Intelligence
 
 An AI-agentic decision-support tool for medical-device post-market surveillance. It
 ingests FDA adverse-event and recall data, simulates incoming complaints, and runs a
@@ -72,9 +72,10 @@ Yes — **standardised in contract, adaptive in content**:
 - Python 3.13 (a virtual environment is expected; this repo uses `.venv-1`).
 - Dependencies from the workspace-root `requirements.txt` (key ones: `langgraph`,
   `anthropic`, `chromadb`, `rapidfuzz`, `fastapi`, `uvicorn`, `python-dotenv`).
-- Optional: an `ANTHROPIC_API_KEY` in a `.env` file to enable LLM-assisted extraction and
-  subquery enrichment. **Without a key the system runs fully offline** using deterministic
-  heuristics and local embeddings.
+- Optional: the `claude` CLI (set `CLAUDE_CLI_PATH` in a `.env` file) to enable
+  LLM-assisted extraction, tool-driven retrieval/trend analysis, and subquery
+  enrichment. **Without it the system runs fully offline** using deterministic
+  heuristics and local embeddings. No `ANTHROPIC_API_KEY` is required.
 
 ```powershell
 # from the workspace root: d:\2025\personal\M.Tech\Course_May-June\Tutorial
@@ -84,8 +85,8 @@ Yes — **standardised in contract, adaptive in content**:
 Optional `.env` (place in `Project/`):
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODEL=claude-3-5-sonnet-latest
+CLAUDE_CLI_PATH=/path/to/claude
+ANTHROPIC_MODEL_NAME=haiku
 ```
 
 ---
@@ -115,11 +116,44 @@ This produces:
 > ```
 >
 > A pre-downloaded `all_recalls.json` and `*_batch*.json` files are already committed, so
-> you can skip Step 1 entirely and go straight to simulation.
+> you can skip Step 1 entirely and go straight to Step 2 (initialize the database).
 
 ---
 
-## 6. Step 2 — Run / simulate the workflow
+## 6. Step 2 — Initialize the database (archive extraction)
+
+Provision the runtime stores from the local FDA archive **before** running the
+workflow. This creates the SQLite schema and extracts the adverse-event archive
+into the Chroma vector index, so retrieval is ready on the first run.
+
+```powershell
+cd Project
+..\.venv-1\Scripts\python.exe -m src.init_db --max-events-per-code 250
+```
+
+What it does (`src/init_db.py`):
+
+- Loads events for the in-scope codes (LNH / JAK / LLZ) from `data/imaging_events/`.
+- Creates the SQLite schema at `outputs/runtime/signal_intelligence.db`
+  (`complaint_archive` + `signal_reports` tables).
+- Extracts each event's product-problem text into the Chroma vector store at
+  `outputs/runtime/chroma/` (one upsert pass per code).
+- Prints a summary: events loaded per code, total events, and vectors indexed.
+
+| Flag                    | Default | Meaning |
+|-------------------------|---------|---------|
+| `--max-events-per-code` | 300     | Archive events loaded and indexed per code |
+| `--reset`               | off     | Delete the existing runtime DB + vector store, then rebuild |
+
+> The workflow (Step 3) also initializes these stores lazily if you skip this
+> step, but running `init_db` first makes provisioning explicit and lets you
+> rebuild the vector index on its own (e.g. after refreshing the archive with
+> `--reset`). The runtime stores under `outputs/runtime/` are git-ignored,
+> regenerable artifacts.
+
+---
+
+## 7. Step 3 — Run / simulate the workflow
 
 Run from the `Project` folder so `src` is importable as a package.
 
@@ -155,7 +189,7 @@ cd Project
 
 ---
 
-## 7. Reading the output
+## 8. Reading the output
 
 Open any file in `Project/outputs/reports/`. Each report contains, depending on its routed
 type: metadata, complaint narrative, extraction summary, risk assessment, **investigation
@@ -167,19 +201,22 @@ which sections were built — useful for observability and debugging.
 
 ---
 
-## 8. Project layout
+## 9. Project layout
 
 ```
 Project/
   data/                       # openFDA downloaders + downloaded JSON
     download_imaging_data.py   # main data download script
+    evaluation/                # gold benchmark (gold_complaints.json)
   src/
-    run_workflow.py            # CLI entrypoint
+    run_workflow.py            # CLI entrypoint (simulate + run)
+    init_db.py                 # provision SQLite + Chroma from the archive
     api.py                     # FastAPI entrypoint
     config.py                  # product codes, paths, model config
     pipeline/
       orchestrator.py          # top-level run loop (load, simulate, persist)
       langgraph_flow.py        # LangGraph graph + gates + tracing
+      service.py               # single-complaint service (web/API path)
       schemas.py               # dataclass contracts + handoff validation
     agents/
       extraction.py            # complaint -> structured signal
@@ -187,19 +224,24 @@ Project/
       retrieval.py             # multi-query evidence retrieval
       risk_analysis.py         # ISO 14971 risk + report-type routing
       archive_trend.py         # trend summary
-      quality_tools.py         # quality-intelligence toolbox
       report_sections.py       # section registry + per-type blueprints
       report_generation.py     # assembles the report from sections
+    tools/                     # model-callable tools + tool-loop engine
+      tool_loop.py             # Anthropic tool-calling loop (iteration + time caps)
+      agent_tools.py           # tool-spec builders bound to agent context
+      quality_tools.py         # quality-intelligence toolbox
+    evaluation/                # gold-benchmark harness (metrics, gold, run_eval)
     observability/tracer.py    # JSONL trace logger
     utils/                     # data loader, storage (SQLite + Chroma), LLM client
   outputs/reports/             # generated reports (gitignored)
+  outputs/runtime/             # SQLite DB + Chroma vector store (gitignored)
   logs/                        # trace logs (gitignored)
   specs/                       # user stories US-01..US-18 + coverage
 ```
 
 ---
 
-## 9. Quick start (TL;DR)
+## 10. Quick start (TL;DR)
 
 ```powershell
 # 1. install deps (workspace root)
@@ -210,9 +252,24 @@ cd Project\data
 ..\..\.venv-1\Scripts\python.exe download_imaging_data.py
 Copy-Item recalls\all_imaging_moldx_recalls.json recalls\all_recalls.json -Force
 
-# 3. run the workflow
+# 3. initialize the database from the archive (creates SQLite + vector index)
 cd ..
+..\.venv-1\Scripts\python.exe -m src.init_db --max-events-per-code 250
+
+# 4. run the workflow
 ..\.venv-1\Scripts\python.exe -m src.run_workflow --complaints-per-code 1 --max-events-per-code 80 --seed 42
 
-# 4. read reports in Project/outputs/reports/
+# 5. read reports in Project/outputs/reports/
 ```
+
+### Optional — evaluate against the gold benchmark
+
+```powershell
+cd Project
+..\.venv-1\Scripts\python.exe -m src.evaluation.run_eval --max-events 250 --k 5
+```
+
+Writes a scored report to `outputs/evaluation/` (rejection accuracy, schema
+validity, retrieval grounding, and — when an LLM backend is configured —
+extraction / risk / escalation accuracy). Add `--strict` to exit non-zero on a
+threshold miss.
