@@ -129,6 +129,7 @@
       <div class="tab active" data-tab="submit">Submit</div>
       <div class="tab" data-tab="flow">LangGraph Flow <span class="dot" id="dot-flow">0</span></div>
       <div class="tab" data-tab="trend">Trend</div>
+      <div class="tab" data-tab="analytics">Analytics</div>
       <div class="tab" data-tab="reports">Reports <span class="dot" id="dot-reports">0</span></div>
       <div class="tab" data-tab="templates">Templates</div>
     </div>
@@ -200,6 +201,34 @@
       </div>
     </section>
 
+    <!-- ANALYTICS -->
+    <section data-panel="analytics" hidden>
+      <div class="panel">
+        <div class="row" style="align-items:flex-end;">
+          <div style="flex:1;">
+            <h2 class="section">Archive analytics <span class="hint">— deterministic aggregation over the loaded FDA archive &amp; generated reports</span></h2>
+          </div>
+          <div>
+            <label for="acProduct">Product code</label>
+            <select id="acProduct"><option value="">All codes</option></select>
+          </div>
+          <div>
+            <button type="button" class="ghost" id="acRefresh">Refresh</button>
+          </div>
+        </div>
+        <div class="err" id="analyticsErr"></div>
+        <div class="stats" id="acStats" style="margin-top:0.8rem;"><div class="empty">Loading analytics…</div></div>
+        <div class="grid cols-2" style="margin-top:1rem;">
+          <div class="chart-wrap" id="acwYear"><canvas id="acYear"></canvas></div>
+          <div class="chart-wrap" id="acwType"><canvas id="acType"></canvas></div>
+          <div class="chart-wrap" id="acwCode"><canvas id="acCode"></canvas></div>
+          <div class="chart-wrap" id="acwRisk"><canvas id="acRisk"></canvas></div>
+          <div class="chart-wrap" id="acwMfr"><canvas id="acMfr"></canvas></div>
+          <div class="chart-wrap" id="acwProblem"><canvas id="acProblem"></canvas></div>
+        </div>
+      </div>
+    </section>
+
     <!-- REPORTS -->
     <section data-panel="reports" hidden>
       <div class="panel">
@@ -249,6 +278,7 @@
       $$(".tab").forEach(x => x.classList.remove("active"));
       t.classList.add("active");
       $$("section[data-panel]").forEach(s => s.hidden = s.dataset.panel !== t.dataset.tab);
+      if (t.dataset.tab === "analytics" && !analyticsLoaded) loadAnalytics();
     }));
     function goTab(name){ $(`.tab[data-tab="${name}"]`).click(); }
 
@@ -278,6 +308,10 @@
       const meta = await (await fetch("/api/meta")).json();
       $("#product_code").innerHTML = meta.product_codes.map(c=>`<option>${c}</option>`).join("");
       $("#event_type").innerHTML = meta.event_types.map(c=>`<option>${c}</option>`).join("");
+      $("#acProduct").innerHTML = `<option value="">All codes</option>` +
+        meta.product_codes.map(c=>`<option>${c}</option>`).join("");
+      $("#acRefresh").addEventListener("click", loadAnalytics);
+      $("#acProduct").addEventListener("change", loadAnalytics);
 
       $("#samples").innerHTML = SAMPLES.map((s,i)=>
         `<button type="button" class="ghost" data-s="${i}" style="margin:0.25rem 0.4rem 0 0;">${s.t}</button>`).join("");
@@ -439,6 +473,77 @@
     function chartOpts(title){
       return { responsive:true, plugins:{ legend:{display:false}, title:{display:true,text:title,color:"#cbd5e1"} },
         scales:{ x:{ ticks:{color:"#94a3b8"}, grid:{color:"#1f2a3a"} }, y:{ ticks:{color:"#94a3b8"}, grid:{color:"#1f2a3a"} } } };
+    }
+
+    // ---------- analytics dashboard ----------
+    const analyticsCharts = {};
+    let analyticsLoaded = false;
+    const AC_PALETTE = ["#38bdf8","#818cf8","#34d399","#fbbf24","#f472b6","#f87171",
+      "#22d3ee","#a78bfa","#4ade80","#facc15","#fb923c","#e879f9"];
+    const AC_TITLES = {
+      year: "Events reported per year", event_type: "Events by event type",
+      product_code: "Events by product code", risk_bucket: "Generated reports by risk bucket",
+      manufacturer: "Top manufacturers", product_problem: "Top reported product problems",
+    };
+
+    function acDrawChart(wrapId, canvasId, type, labels, data, title, horizontal){
+      const wrap = $("#"+wrapId);
+      if (analyticsCharts[canvasId]){ analyticsCharts[canvasId].destroy(); delete analyticsCharts[canvasId]; }
+      if (!labels || !labels.length){ wrap.innerHTML = `<div class="empty">No data for “${title}”.</div>`; return; }
+      wrap.innerHTML = `<canvas id="${canvasId}"></canvas>`;
+      const colors = labels.map((_,i)=>AC_PALETTE[i % AC_PALETTE.length]);
+      const isPie = type === "doughnut";
+      const cfg = {
+        type,
+        data: { labels, datasets: [{ label: title, data,
+          backgroundColor: isPie ? colors : "rgba(56,189,248,0.5)",
+          borderColor: isPie ? "#0b1220" : "#38bdf8", borderWidth: 1 }] },
+        options: isPie
+          ? { responsive:true, plugins:{ legend:{position:"right",labels:{color:"#cbd5e1",boxWidth:12}},
+              title:{display:true,text:title,color:"#cbd5e1"} } }
+          : { ...chartOpts(title), indexAxis: horizontal ? "y" : "x" },
+      };
+      analyticsCharts[canvasId] = new Chart($("#"+canvasId), cfg);
+    }
+
+    function renderAnalyticsStats(s){
+      const dr = s.date_range && s.date_range.min ? `${s.date_range.min}–${s.date_range.max}` : "—";
+      $("#acStats").innerHTML = `
+        <div class="stat"><div class="v">${s.total_events}</div><div class="k">Adverse events loaded</div></div>
+        <div class="stat"><div class="v">${s.distinct_manufacturers}</div><div class="k">Distinct manufacturers</div></div>
+        <div class="stat"><div class="v">${s.software_related_pct}%</div><div class="k">Software-related events</div></div>
+        <div class="stat"><div class="v">${s.recalls}</div><div class="k">Recalls in scope</div></div>
+        <div class="stat"><div class="v">${s.reports_generated}</div><div class="k">Reports generated</div></div>
+        <div class="stat"><div class="v">${dr}</div><div class="k">Event date range</div></div>`;
+    }
+
+    async function loadAnalytics(){
+      $("#analyticsErr").textContent = "";
+      const pc = $("#acProduct").value;
+      const codeQ = pc ? `&product_code=${encodeURIComponent(pc)}` : "";
+      try {
+        const stats = await (await fetch("/api/stats")).json();
+        renderAnalyticsStats(stats);
+        // [wrapId, canvasId, chartType, dimension, horizontal, productScoped]
+        const charts = [
+          ["acwYear","acYear","bar","year",false,true],
+          ["acwType","acType","doughnut","event_type",false,true],
+          ["acwCode","acCode","bar","product_code",false,false],
+          ["acwRisk","acRisk","doughnut","risk_bucket",false,false],
+          ["acwMfr","acMfr","bar","manufacturer",true,true],
+          ["acwProblem","acProblem","bar","product_problem",true,true],
+        ];
+        for (const [wrapId,canvasId,type,dim,horiz,scoped] of charts){
+          const url = `/api/trends?dimension=${dim}${scoped ? codeQ : ""}`;
+          const r = await (await fetch(url)).json();
+          const series = r.series || [];
+          acDrawChart(wrapId, canvasId, type, series.map(x=>x.label), series.map(x=>x.count),
+            AC_TITLES[dim] || dim, horiz);
+        }
+        analyticsLoaded = true;
+      } catch(e){
+        $("#analyticsErr").textContent = "Could not load analytics. Is the service running?";
+      }
     }
 
     function renderReports(reports){

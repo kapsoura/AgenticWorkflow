@@ -5,11 +5,13 @@ from typing import Optional
 from zipfile import ZipFile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.agents.report_sections import SECTION_KEYWORDS, blueprint_for
-from src.config import PRODUCT_CODES, REPORTS_DIR
+from src.analytics import compute_stats, compute_trends
+from src.config import PRODUCT_CODES, REPORTS_DIR, SQLITE_DB_PATH
 from src.pipeline.orchestrator import SignalWorkflowOrchestrator, WorkflowConfig
 from src.pipeline.service import SignalService
 from src.utils.docx_io import extract_headings_from_docx, render_report_docx
@@ -39,6 +41,16 @@ app = FastAPI(
     title="Multi-Agent-Quality-Intelligence API",
     version="0.4.0",
     lifespan=lifespan,
+)
+
+# Local dev tool: allow the standalone React frontend (Vite dev server) to call
+# the read-only analytics/meta endpoints cross-origin. The served console at "/"
+# is same-origin and unaffected.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -79,6 +91,39 @@ def meta() -> dict:
         "event_types": ["Malfunction", "Injury", "Death"],
         "report_types": ACTIVE_REPORT_TYPES,
     }
+
+
+@app.get("/api/stats")
+def api_stats() -> dict:
+    """Headline dashboard counts computed only from the real loaded archive."""
+    service = get_service()
+    return compute_stats(service.events_by_code, service.recalls, SQLITE_DB_PATH)
+
+
+@app.get("/api/trends")
+def api_trends(
+    dimension: str,
+    product_code: Optional[str] = None,
+    event_type: Optional[str] = None,
+    software_related: Optional[bool] = None,
+) -> dict:
+    """Aggregate one allow-listed dimension into a chart-ready series.
+
+    Deterministic and parameterized -- no free-form SQL. Unknown dimensions or
+    filters return HTTP 400; empty data sources return an empty series.
+    """
+    service = get_service()
+    filters = {
+        "product_code": product_code,
+        "event_type": event_type,
+        "software_related": software_related,
+    }
+    try:
+        return compute_trends(
+            service.events_by_code, SQLITE_DB_PATH, dimension, filters
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/api/templates")
