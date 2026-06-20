@@ -26,6 +26,8 @@ This directory decomposes the Multi-Agent Regulatory Signal Intelligence System 
 | [US-16](US-16-evaluation-harness.md) | Evaluation harness (outcome+trajectory) | D. Evaluation | M6 | 3–4 | P0 |
 | [US-17](US-17-dpo-alignment.md) | DPO alignment study | D. Evaluation | M5 | 3 | P1 |
 | [US-18](US-18-ablation-studies.md) | Ablation studies | D. Evaluation | M6 | 4 | P1 |
+| [US-19](US-19-memory-parallel-guardrails.md) | Memory + parallel + explicit guardrails | C. Integration | M2 | 3-4 | P0 |
+| [US-20](US-20-structured-extraction-clustering-integration.md) | Integrate structured extraction + clustering | C. Integration | M2+M3+M4 | 4 | P1 |
 
 Priority: **P0** = critical path (system doesn't work without it) · **P1** = important · **P2** = enhancement / stretch.
 

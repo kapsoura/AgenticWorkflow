@@ -1,4 +1,5 @@
 import operator
+import sqlite3
 from time import monotonic
 from typing import Annotated, Dict, List, TypedDict
 
@@ -11,8 +12,10 @@ from src.agents.report_generation import ReportGenerationAgent
 from src.agents.retrieval import RetrievalAgent
 from src.agents.risk_analysis import RiskAnalysisAgent
 from src.agents.report_sections import ReportContext
+from src.config import SQLITE_DB_PATH
 from src.observability.tracer import TraceLogger
 from src.pipeline.schemas import Complaint, RetrievalEvidence, validate_handoff
+from src.utils.storage import embed_text
 
 
 class WorkflowState(TypedDict, total=False):
@@ -37,10 +40,27 @@ class WorkflowState(TypedDict, total=False):
     signal_reports: list
     vector_collection: object
     template_sections: list
+    input_guardrail_pass: bool
+    input_guardrail_reasons: List[str]
+    memory_summary: str
+    memory_hits: List[str]
+    retrieval_done: bool
+    trend_done: bool
+    output_guardrail_pass: bool
+    output_guardrail_reasons: List[str]
 
 
 class LangGraphSignalWorkflow:
     MIN_RETRIEVAL_SCORE = 0.3
+    _INJECTION_PATTERNS = (
+        "ignore previous instructions",
+        "ignore all instructions",
+        "system prompt",
+        "developer mode",
+        "jailbreak",
+        "disregard your rules",
+    )
+    _UNSUPPORTED_CLAIM_TERMS = ("guaranteed", "definitive", "certain", "proven")
 
     def __init__(self):
         self.extraction_agent = ExtractionAgent()
@@ -61,17 +81,136 @@ class LangGraphSignalWorkflow:
     def _build_graph(self) -> StateGraph:
         graph = StateGraph(WorkflowState)
 
+        graph.add_node("input_guardrail", self._input_guardrail)
         graph.add_node("extract", self._extract)
+        graph.add_node("memory", self._memory)
         graph.add_node("retrieve", self._retrieve)
+        graph.add_node("trend", self._trend)
+        graph.add_node("merge", self._merge)
         graph.add_node("risk", self._risk)
         graph.add_node("assemble", self._assemble)
+        graph.add_node("output_guardrail", self._output_guardrail)
+        graph.add_node("end_rejected", self._end_rejected)
+        graph.add_node("end_guarded", self._end_guarded)
+        graph.add_node("end_ok", self._end_ok)
 
-        graph.add_edge(START, "extract")
-        graph.add_edge("extract", "retrieve")
-        graph.add_edge("retrieve", "risk")
+        graph.add_edge(START, "input_guardrail")
+        graph.add_conditional_edges(
+            "input_guardrail",
+            self._route_after_input_guardrail,
+            {
+                "extract": "extract",
+                "end_rejected": "end_rejected",
+            },
+        )
+        graph.add_edge("extract", "memory")
+        graph.add_edge("memory", "retrieve")
+        graph.add_edge("memory", "trend")
+        graph.add_edge("retrieve", "merge")
+        graph.add_edge("trend", "merge")
+        graph.add_edge("merge", "risk")
         graph.add_edge("risk", "assemble")
-        graph.add_edge("assemble", END)
+        graph.add_edge("assemble", "output_guardrail")
+        graph.add_conditional_edges(
+            "output_guardrail",
+            self._route_after_output_guardrail,
+            {
+                "end_ok": "end_ok",
+                "end_guarded": "end_guarded",
+            },
+        )
+        graph.add_edge("end_rejected", END)
+        graph.add_edge("end_guarded", END)
+        graph.add_edge("end_ok", END)
         return graph
+
+    def _input_guardrail(self, state: WorkflowState) -> WorkflowState:
+        self._check_deadline(state)
+        started = monotonic()
+        narrative = state["complaint"].narrative.lower()
+        reasons = [
+            "InputGuardrail: potential prompt-injection pattern detected"
+            for pattern in self._INJECTION_PATTERNS
+            if pattern in narrative
+        ]
+        passed = len(reasons) == 0
+
+        self._trace(
+            state,
+            agent="input_guardrail",
+            event="completed",
+            gate_result="pass" if passed else "review",
+            latency_ms=(monotonic() - started) * 1000.0,
+            metadata={"reasons": reasons},
+        )
+        return {
+            "input_guardrail_pass": passed,
+            "input_guardrail_reasons": reasons,
+            "review_needed": not passed,
+            "review_reasons": reasons,
+        }
+
+    def _memory(self, state: WorkflowState) -> WorkflowState:
+        self._check_deadline(state)
+        started = monotonic()
+        complaint = state["complaint"]
+        memory_hits: List[str] = []
+        memory_lines: List[str] = []
+
+        if SQLITE_DB_PATH.exists():
+            try:
+                conn = sqlite3.connect(SQLITE_DB_PATH)
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT report_id, risk_bucket, report_type
+                    FROM signal_reports
+                    WHERE complaint_id IN (
+                        SELECT complaint_id FROM complaint_archive WHERE product_code = ?
+                    )
+                    ORDER BY created_at DESC
+                    LIMIT 3
+                    """,
+                    (complaint.product_code,),
+                )
+                rows = cur.fetchall()
+                for report_id, risk_bucket, report_type in rows:
+                    memory_hits.append(str(report_id))
+                    memory_lines.append(
+                        f"prior report {report_id}: bucket={risk_bucket}, type={report_type}"
+                    )
+                conn.close()
+            except Exception:
+                memory_lines.append("sqlite memory unavailable")
+
+        vector_collection = state.get("vector_collection")
+        if vector_collection is not None:
+            try:
+                result = vector_collection.query(
+                    query_embeddings=[embed_text(complaint.narrative)],
+                    n_results=3,
+                )
+                ids = result.get("ids", [[]])[0]
+                if ids:
+                    for value in ids:
+                        memory_hits.append(f"vector:{value}")
+                    memory_lines.append(f"vector neighbors: {', '.join(str(v) for v in ids)}")
+            except Exception:
+                memory_lines.append("vector memory unavailable")
+
+        if not memory_lines:
+            memory_lines.append("no prior similar complaints or reports found")
+
+        summary = " ; ".join(memory_lines)[:600]
+        self._trace(
+            state,
+            agent="memory",
+            event="completed",
+            gate_result="pass",
+            latency_ms=(monotonic() - started) * 1000.0,
+            metadata={"memory_hits": len(memory_hits)},
+        )
+        return {"memory_summary": summary, "memory_hits": memory_hits}
 
     def _extract(self, state: WorkflowState) -> WorkflowState:
         self._check_deadline(state)
@@ -96,7 +235,12 @@ class LangGraphSignalWorkflow:
             event="completed",
             gate_result="review" if review_reasons else "pass",
             latency_ms=(monotonic() - started) * 1000.0,
-            metadata={"confidence": extraction.confidence, "errors": errors},
+            metadata={
+                "confidence": extraction.confidence,
+                "errors": errors,
+                "backend": getattr(self.extraction_agent, "last_backend", "integrated_unavailable"),
+                "fallback_reason": getattr(self.extraction_agent, "last_fallback_reason", None),
+            },
         )
         return {"extraction": extraction, "review_needed": bool(review_reasons), "review_reasons": review_reasons}
 
@@ -104,12 +248,30 @@ class LangGraphSignalWorkflow:
         self._check_deadline(state)
         started = monotonic()
         complaint = state["complaint"]
+        extraction = state["extraction"]
+        if str(extraction.qms_complaint_category).strip().upper() == "NOT_AVAILABLE" or extraction.confidence <= 0.0:
+            self._trace(
+                state,
+                agent="retrieve",
+                event="completed",
+                gate_result="pass",
+                latency_ms=(monotonic() - started) * 1000.0,
+                metadata={"kept_items": 0, "errors": [], "reason": "extraction_not_available"},
+            )
+            return {
+                "retrieval": [],
+                "subqueries": [],
+                "retrieval_done": True,
+                "review_needed": False,
+                "review_reasons": [],
+            }
+
         subqueries = self.orchestrator_agent.plan_subqueries(
             complaint=complaint,
-            extraction=state["extraction"],
+            extraction=extraction,
         )
         retrieval = self.retrieval_agent.retrieve(
-            extracted=state["extraction"],
+            extracted=extraction,
             complaint_product_code=complaint.product_code,
             events_by_code=state["events_by_code"],
             recalls=state["recalls"],
@@ -136,8 +298,54 @@ class LangGraphSignalWorkflow:
         return {
             "retrieval": retrieval,
             "subqueries": subqueries,
+            "retrieval_done": True,
             "review_needed": bool(review_reasons),
             "review_reasons": review_reasons,
+        }
+
+    def _trend(self, state: WorkflowState) -> WorkflowState:
+        self._check_deadline(state)
+        started = monotonic()
+        complaint = state["complaint"]
+        trend = self.trend_agent.summarize(
+            product_code=complaint.product_code,
+            events=state["events_by_code"].get(complaint.product_code, []),
+        )
+        self._trace(
+            state,
+            agent="trend",
+            event="completed",
+            gate_result="pass",
+            latency_ms=(monotonic() - started) * 1000.0,
+            metadata={
+                "trend_direction": trend.trend_direction,
+                "backend": getattr(self.trend_agent, "last_backend", "integrated_unavailable"),
+                "fallback_reason": getattr(self.trend_agent, "last_fallback_reason", None),
+            },
+        )
+        return {"trend": trend, "trend_done": True}
+
+    def _merge(self, state: WorkflowState) -> WorkflowState:
+        self._check_deadline(state)
+        started = monotonic()
+        reasons: List[str] = []
+        if not state.get("retrieval_done"):
+            reasons.append("Merge: retrieval branch did not complete")
+        if not state.get("trend_done"):
+            reasons.append("Merge: trend branch did not complete")
+
+        self._trace(
+            state,
+            agent="merge",
+            event="completed",
+            gate_result="review" if reasons else "pass",
+            latency_ms=(monotonic() - started) * 1000.0,
+            metadata={"retrieval_done": bool(state.get("retrieval_done")), "trend_done": bool(state.get("trend_done"))},
+        )
+        return {
+            "retrieval": state.get("retrieval", []),
+            "review_needed": bool(reasons),
+            "review_reasons": reasons,
         }
 
     def _risk(self, state: WorkflowState) -> WorkflowState:
@@ -198,6 +406,7 @@ class LangGraphSignalWorkflow:
                 risk=risk,
                 report_type=report_type,
                 events_by_code=state["events_by_code"],
+                trend=state.get("trend"),
                 subqueries=state.get("subqueries"),
                 review_needed=base_review_needed,
                 review_reasons=list(base_review_reasons),
@@ -236,6 +445,94 @@ class LangGraphSignalWorkflow:
             "review_reasons": extra_review_reasons,
         }
 
+    def _output_guardrail(self, state: WorkflowState) -> WorkflowState:
+        self._check_deadline(state)
+        started = monotonic()
+        reports = list(state.get("signal_reports", []))
+        review_reasons: List[str] = []
+
+        for report in reports:
+            report_reasons: List[str] = []
+            report_text = report.report_markdown.lower()
+            evidence_ids = [item.evidence_id for item in report.retrieval]
+            has_citation_id = any(eid.lower() in report_text for eid in evidence_ids)
+
+            if any(term in report_text for term in self._UNSUPPORTED_CLAIM_TERMS):
+                report_reasons.append("OutputGuardrail: unsupported high-certainty claim language detected")
+
+            high_risk = report.risk.risk_bucket in {"ALARP", "UNACCEPTABLE"}
+            regulatory_claim = "reportable serious incident" in report_text or "regulatory notification" in report_text
+            if (high_risk or regulatory_claim) and not has_citation_id:
+                report_reasons.append("OutputGuardrail: citation completeness failed for risk/regulatory claim")
+
+            if report_reasons:
+                report.review_needed = True
+                report.review_reasons.extend(r for r in report_reasons if r not in report.review_reasons)
+                review_reasons.extend(report_reasons)
+
+        passed = len(review_reasons) == 0
+        self._trace(
+            state,
+            agent="output_guardrail",
+            event="completed",
+            gate_result="pass" if passed else "review",
+            latency_ms=(monotonic() - started) * 1000.0,
+            metadata={"reasons": review_reasons},
+        )
+        return {
+            "signal_reports": reports,
+            "signal_report": reports[0] if reports else state.get("signal_report"),
+            "output_guardrail_pass": passed,
+            "output_guardrail_reasons": review_reasons,
+            "review_needed": bool(review_reasons),
+            "review_reasons": review_reasons,
+        }
+
+    def _end_rejected(self, state: WorkflowState) -> WorkflowState:
+        reasons = state.get("input_guardrail_reasons", ["InputGuardrail: rejected"]) or [
+            "InputGuardrail: rejected"
+        ]
+        self._trace(
+            state,
+            agent="end_rejected",
+            event="completed",
+            gate_result="review",
+            latency_ms=0.0,
+            metadata={"reasons": reasons},
+        )
+        return {"signal_reports": [], "review_needed": True, "review_reasons": reasons}
+
+    def _end_guarded(self, state: WorkflowState) -> WorkflowState:
+        reasons = state.get("output_guardrail_reasons", [])
+        self._trace(
+            state,
+            agent="end_guarded",
+            event="completed",
+            gate_result="review",
+            latency_ms=0.0,
+            metadata={"reasons": reasons},
+        )
+        return {}
+
+    def _end_ok(self, state: WorkflowState) -> WorkflowState:
+        self._trace(
+            state,
+            agent="end_ok",
+            event="completed",
+            gate_result="pass",
+            latency_ms=0.0,
+            metadata={},
+        )
+        return {}
+
+    @staticmethod
+    def _route_after_input_guardrail(state: WorkflowState) -> str:
+        return "extract" if state.get("input_guardrail_pass", False) else "end_rejected"
+
+    @staticmethod
+    def _route_after_output_guardrail(state: WorkflowState) -> str:
+        return "end_ok" if state.get("output_guardrail_pass", True) else "end_guarded"
+
     def run_for_complaint(
         self,
         trace_id: str,
@@ -259,9 +556,13 @@ class LangGraphSignalWorkflow:
                 "template_sections": template_sections,
                 "review_needed": False,
                 "review_reasons": [],
+                "input_guardrail_pass": True,
+                "input_guardrail_reasons": [],
+                "output_guardrail_pass": True,
+                "output_guardrail_reasons": [],
             }
         )
-        return result["signal_reports"]
+        return result.get("signal_reports", [])
 
     @staticmethod
     def _trace(

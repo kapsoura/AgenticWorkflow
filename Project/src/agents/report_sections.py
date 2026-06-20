@@ -71,16 +71,31 @@ def _complaint_summary(ctx: ReportContext, orch) -> str:
     return ctx.complaint.narrative
 
 
+def _na(value) -> str:
+    if value is None:
+        return "Not available"
+    if isinstance(value, str):
+        text = value.strip()
+        if text.lower() in {"", "not_available", "not available", "unknown", "n/a"}:
+            return "Not available"
+        return text
+    if isinstance(value, list):
+        values = [str(v).strip() for v in value if str(v).strip()]
+        return ", ".join(values) if values else "Not available"
+    return str(value)
+
+
 def _extraction_details(ctx: ReportContext, orch) -> str:
     e = ctx.extraction
+    unavailable = str(e.qms_complaint_category).strip().upper() == "NOT_AVAILABLE"
     return "\n".join(
         [
-            f"- Category: {e.qms_complaint_category}",
-            f"- Confidence: {e.confidence}",
-            f"- Key Issues: {', '.join(e.key_issues) or 'None'}",
-            f"- Safety Flags: {e.safety_flags}",
-            f"- ISO 13485 Clauses: {', '.join(e.iso_13485_clauses) or 'None'}",
-            f"- ISO 14971 Hazard Tags: {', '.join(e.iso_14971_hazard_tags) or 'None'}",
+            f"- Category: {_na(e.qms_complaint_category)}",
+            f"- Confidence: {'Not available' if unavailable else _na(e.confidence)}",
+            f"- Key Issues: {_na(e.key_issues)}",
+            f"- Safety Flags: {'Not available' if unavailable else _na(e.safety_flags)}",
+            f"- ISO 13485 Clauses: {_na(e.iso_13485_clauses)}",
+            f"- ISO 14971 Hazard Tags: {_na(e.iso_14971_hazard_tags)}",
         ]
     )
 
@@ -116,7 +131,7 @@ def _risk_assessment(ctx: ReportContext, orch) -> str:
 def _evidence_precedent(ctx: ReportContext, orch) -> str:
     evidence = orch.ensure_evidence(ctx)
     if not evidence:
-        return "- No supporting FDA precedent above the relevance threshold; manual evidence review required."
+        return "Not available"
     return "\n".join(
         f"- [{item.source_type}] {item.evidence_id} | score={item.score}"
         f"{(' | facet: ' + item.metadata['subquery']) if item.metadata.get('subquery') else ''}"
@@ -128,14 +143,14 @@ def _evidence_precedent(ctx: ReportContext, orch) -> str:
 def _subquery_plan(ctx: ReportContext, orch) -> str:
     subqueries = orch.ensure_subqueries(ctx)
     if not subqueries:
-        return "- No subqueries generated."
+        return "Not available"
     return "\n".join(f"- {q}" for q in subqueries)
 
 
 def _quality_intelligence(ctx: ReportContext, orch) -> str:
     results = orch.ensure_quality_intelligence(ctx)
     if not results:
-        return "- No quality-intelligence findings available for this archive slice."
+        return "Not available"
     lines: List[str] = []
     current_theme = None
     for result in results:
@@ -158,32 +173,37 @@ def _capa_plan(ctx: ReportContext, orch) -> str:
 
 def _trend_context(ctx: ReportContext, orch) -> str:
     t = orch.ensure_trend(ctx)
+    unavailable = str(t.trend_direction).strip().lower() == "not_available"
     return "\n".join(
         [
-            f"- Total Events in Working Archive: {t.total_events}",
-            f"- Software-like Problem Events: {t.software_problem_events}",
-            f"- Previous Year Event Count: {t.previous_year_events}",
-            f"- Latest Year Event Count: {t.latest_year_events}",
-            f"- Trend Direction: {t.trend_direction}",
+            f"- Total Events in Working Archive: {'Not available' if unavailable else _na(t.total_events)}",
+            f"- Software-like Problem Events: {'Not available' if unavailable else _na(t.software_problem_events)}",
+            f"- Previous Year Event Count: {'Not available' if unavailable else _na(t.previous_year_events)}",
+            f"- Latest Year Event Count: {'Not available' if unavailable else _na(t.latest_year_events)}",
+            f"- Trend Direction: {'Not available' if unavailable else _na(t.trend_direction)}",
         ]
     )
 
 
 def _monitoring_recommendation(ctx: ReportContext, orch) -> str:
     t = orch.ensure_trend(ctx)
-    if t.trend_direction == "upward":
+    direction = str(t.trend_direction).strip().lower()
+    if direction == "not_available":
+        rec = "Not available"
+    elif direction == "upward":
         rec = "Trend rising; schedule a focused review and consider a CAPA pre-assessment."
-    elif t.trend_direction == "downward":
+    elif direction == "downward":
         rec = "Trend declining; continue routine monitoring and confirm prior actions held."
     else:
         rec = "Trend flat; maintain monthly management-review monitoring."
-    return "\n".join([f"- Recommendation: {rec}", f"- Current Trend Direction: {t.trend_direction}"])
+    display_direction = "Not available" if direction == "not_available" else _na(t.trend_direction)
+    return "\n".join([f"- Recommendation: {rec}", f"- Current Trend Direction: {display_direction}"])
 
 
 def _orchestrator_questions(ctx: ReportContext, orch) -> str:
     questions = orch.ensure_questions(ctx)
     if not questions:
-        return "- No additional questions generated."
+        return "Not available"
     return "\n".join(f"- {q}" for q in questions)
 
 

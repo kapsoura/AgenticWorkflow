@@ -9,6 +9,7 @@ from src.agents.report_sections import ReportContext, blueprint_for, SECTION_BUI
 from src.agents.retrieval import RetrievalAgent
 from src.agents.risk_analysis import RiskAnalysisAgent
 from src.pipeline.schemas import Complaint, ExtractedSignal, RetrievalEvidence, RiskAssessment, TrendSummary
+from src.utils.prompt_store import render_prompt
 
 # Report type -> quality-intelligence themes the toolbox should run for that report.
 REPORT_THEME_MAP = {
@@ -94,6 +95,9 @@ class OrchestrationAgent:
 
     def ensure_subqueries(self, ctx: ReportContext) -> List[str]:
         if ctx.subqueries is None:
+            if str(ctx.extraction.qms_complaint_category).strip().upper() == "NOT_AVAILABLE" or ctx.extraction.confidence <= 0.0:
+                ctx.subqueries = []
+                return ctx.subqueries
             ctx.subqueries = self.plan_subqueries(ctx.complaint, ctx.extraction, ctx.risk)
         return ctx.subqueries
 
@@ -110,6 +114,9 @@ class OrchestrationAgent:
 
     def ensure_quality_intelligence(self, ctx: ReportContext) -> List[ToolResult]:
         if ctx.quality_intelligence is None:
+            if str(ctx.extraction.qms_complaint_category).strip().upper() == "NOT_AVAILABLE" or ctx.extraction.confidence <= 0.0:
+                ctx.quality_intelligence = []
+                return ctx.quality_intelligence
             events = ctx.events_by_code.get(ctx.complaint.product_code, [])
             themes = REPORT_THEME_MAP.get(ctx.report_type)
             ctx.quality_intelligence = self.toolbox.run_for_themes(
@@ -122,6 +129,9 @@ class OrchestrationAgent:
 
     def ensure_questions(self, ctx: ReportContext) -> List[str]:
         if ctx.report_questions is None:
+            if str(ctx.extraction.qms_complaint_category).strip().upper() == "NOT_AVAILABLE" or ctx.extraction.confidence <= 0.0:
+                ctx.report_questions = []
+                return ctx.report_questions
             ctx.report_questions = self.select_report_questions(
                 ctx.complaint, ctx.risk, report_type=ctx.report_type
             )
@@ -131,66 +141,32 @@ class OrchestrationAgent:
     def plan_subqueries(
         self, complaint: Complaint, extraction: ExtractedSignal, risk: "RiskAssessment | None" = None
     ) -> List[str]:
-        """Decompose a complaint into focused retrieval subqueries.
+        """Decompose a complaint into focused retrieval subqueries using an LLM only.
 
-        Deterministic by default: one facet per key issue / hazard tag, plus
-        report-type-specific facets when a risk assessment is available. Optionally
-        enriched by an LLM when a key is present (mirrors the extraction agent's
-        offline-first pattern).
+        If the model is unavailable, return no subqueries so the report can
+        surface Not available instead of inventing deterministic facets.
         """
-        facets: List[str] = []
-        for issue in extraction.key_issues:
-            if issue:
-                facets.append(f"{complaint.product_code} {issue} failure precedent")
-        for tag in extraction.iso_14971_hazard_tags:
-            if tag:
-                facets.append(f"{tag} hazard similar events")
-
-        report_type = risk.report_type if risk is not None else None
-        if report_type in {"INCIDENT_ASSESSMENT", "VIGILANCE_ESCALATION"}:
-            facets.append(f"{complaint.product_code} serious injury or death precedent")
-            facets.append(f"{complaint.product_code} recall related to {extraction.qms_complaint_category}")
-        elif report_type in {"CAPA", "CAPA_INVESTIGATION"}:
-            facets.append(f"{complaint.product_code} recurring root cause {extraction.qms_complaint_category}")
-            facets.append(f"{complaint.product_code} corrective action effectiveness")
-        elif report_type in {"PSUR", "TREND_MONITORING"}:
-            facets.append(f"{complaint.product_code} trend over time {extraction.qms_complaint_category}")
-
-        enriched = self._llm_subqueries(complaint, extraction)
-        for q in enriched:
-            if q and q not in facets:
-                facets.append(q)
-
-        # De-duplicate, preserve order, cap to keep retrieval bounded.
-        seen = set()
-        ordered: List[str] = []
-        for q in facets:
-            key = q.lower()
-            if key not in seen:
-                seen.add(key)
-                ordered.append(q)
-        return ordered[:6] or [f"{complaint.product_code} {extraction.qms_complaint_category}"]
-
-    def _llm_subqueries(self, complaint: Complaint, extraction: ExtractedSignal) -> List[str]:
         llm = getattr(self.extraction_agent, "llm", None)
         if llm is None or not getattr(llm, "enabled", False):
             return []
+
         result = llm.complete_json(
-            system_prompt=(
-                "You decompose a medical device complaint into 2-4 focused search subqueries "
-                "for retrieving similar FDA MAUDE events and recalls. Return JSON "
-                '{"subqueries": ["...", "..."]}.'
-            ),
-            user_prompt=(
-                f"Product code: {complaint.product_code}\n"
-                f"Category: {extraction.qms_complaint_category}\n"
-                f"Key issues: {', '.join(extraction.key_issues)}\n"
-                f"Narrative: {complaint.narrative[:600]}"
+            system_prompt=render_prompt("subqueries_system"),
+            user_prompt=render_prompt(
+                "subqueries_user",
+                product_code=complaint.product_code,
+                report_type=risk.report_type if risk is not None else "UNKNOWN",
+                category=extraction.qms_complaint_category,
+                key_issues=", ".join(extraction.key_issues) or "None",
+                narrative=complaint.narrative[:600],
             ),
             fallback={"subqueries": []},
         )
         subqueries = result.get("subqueries", [])
-        return [str(q) for q in subqueries if isinstance(q, (str,)) and q.strip()][:4]
+        return [str(q) for q in subqueries if isinstance(q, str) and q.strip()][:4]
+
+    def _llm_subqueries(self, complaint: Complaint, extraction: ExtractedSignal) -> List[str]:
+        return self.plan_subqueries(complaint, extraction)
 
     # --- Section-driven assembly -------------------------------------------
     def build_sections(self, ctx: ReportContext, tracer=None, section_specs=None) -> List[Tuple[str, str]]:
@@ -220,30 +196,24 @@ class OrchestrationAgent:
     def select_report_questions(
         self, complaint: Complaint, risk: RiskAssessment, report_type: "str | None" = None
     ) -> List[str]:
-        report_type = report_type or risk.report_type
-        questions: List[str] = []
-        if report_type in {"INCIDENT_ASSESSMENT", "VIGILANCE_ESCALATION"}:
-            questions.extend(
-                [
-                    "Does this complaint meet the MDR serious-incident criteria for mandatory reporting?",
-                    "What immediate containment actions are mandatory within 24h?",
-                ]
-            )
-        elif report_type in {"CAPA", "CAPA_INVESTIGATION"}:
-            questions.extend(
-                [
-                    "Which root-cause branch should be tested first?",
-                    "What verification evidence is needed before release decision?",
-                ]
-            )
-        else:
-            questions.extend(
-                [
-                    "Is recurrence trending above baseline for this product code?",
-                    "Should this complaint be monitored in monthly management review?",
-                ]
-            )
+        llm = getattr(self.extraction_agent, "llm", None)
+        if llm is None or not getattr(llm, "enabled", False):
+            return []
 
-        if complaint.event_type.lower() in {"injury", "death"}:
-            questions.append("Has PRRC and clinical safety been notified with trace ID?")
-        return questions
+        report_type = report_type or risk.report_type
+        result = llm.complete_json(
+            system_prompt=render_prompt("questions_system"),
+            user_prompt=render_prompt(
+                "questions_user",
+                report_type=report_type,
+                event_type=complaint.event_type,
+                risk_bucket=risk.risk_bucket,
+                severity=risk.severity_level,
+                probability=risk.probability_level,
+                product_code=complaint.product_code,
+                narrative=complaint.narrative[:600],
+            ),
+            fallback={"questions": []},
+        )
+        questions = result.get("questions", [])
+        return [str(q) for q in questions if isinstance(q, str) and q.strip()][:4]
