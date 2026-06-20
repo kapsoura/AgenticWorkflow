@@ -1,12 +1,17 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-from src.tools.agent_tools import quality_tool_specs, retrieval_tool_specs
+from src.tools.agent_tools import quality_tool_specs, retrieval_tool_specs, trend_tool_specs
 from src.agents.archive_trend import ArchiveTrendAnalyzer
 from src.agents.extraction import ExtractionAgent
 from src.tools.quality_tools import QualityAnalyticsToolbox, ToolResult
 from src.agents.report_generation import ReportGenerationAgent
-from src.agents.report_sections import ReportContext, blueprint_for, SECTION_BUILDERS
+from src.agents.report_sections import (
+    NARRATIVE_SECTIONS,
+    ReportContext,
+    blueprint_for,
+    SECTION_BUILDERS,
+)
 from src.agents.retrieval import RetrievalAgent
 from src.agents.risk_analysis import RiskAnalysisAgent
 from src.pipeline.schemas import Complaint, ExtractedSignal, RetrievalEvidence, RiskAssessment, TrendSummary
@@ -261,6 +266,139 @@ class OrchestrationAgent:
                 ctx.complaint, ctx.risk, report_type=ctx.report_type
             )
         return ctx.report_questions
+
+    # --- Section-narrative agent (de-hardcodes the prose sections) ----------
+    def ensure_section_narratives(self, ctx: ReportContext) -> "dict[str, str]":
+        """Generate the interpretive prose for this report's narrative sections.
+
+        One model pass drafts the narrative for *every* narrative section in the
+        active blueprint at once (tool-calling preferred, plain JSON fallback). The
+        regulatory VERDICTS (risk bucket, escalation/PRRC/FSCA flags, MDR reportable
+        YES/NO) are passed in as deterministic facts and rendered separately by the
+        section builders — the model writes only the surrounding justification and
+        must ground every claim in a cited FDA record or a given fact.
+
+        Cached on ``ctx``. When no model backend is available, each section is
+        ``"Not available"`` so the report never falls back to hardcoded prose.
+        """
+        if ctx.section_narratives is not None:
+            return ctx.section_narratives
+
+        targets = [s.name for s in blueprint_for(ctx.report_type) if s.name in NARRATIVE_SECTIONS]
+        if not targets:
+            ctx.section_narratives = {}
+            return ctx.section_narratives
+
+        # No usable extraction => surface Not available instead of inventing prose.
+        if str(ctx.extraction.qms_complaint_category).strip().upper() == "NOT_AVAILABLE" or ctx.extraction.confidence <= 0.0:
+            ctx.section_narratives = {name: "Not available" for name in targets}
+            return ctx.section_narratives
+
+        facts = self._narrative_facts(ctx)
+        evidence = self.ensure_evidence(ctx)
+        allowed = {e.evidence_id for e in evidence if getattr(e, "evidence_id", "")}
+        evidence_block = (
+            "\n".join(f"- {e.evidence_id} [{e.source_type}] {e.snippet}" for e in evidence)
+            or "None retrieved"
+        )
+        sections_block = "\n".join(f"- {name}: {NARRATIVE_SECTIONS[name]}" for name in targets)
+
+        system = render_prompt("section_narratives_system")
+        user = render_prompt(
+            "section_narratives_user",
+            evidence_block=evidence_block,
+            sections_block=sections_block,
+            **facts,
+        )
+
+        data: "dict" = {}
+        # Preferred path: a single tool-calling pass so the model can pull more
+        # MAUDE/recall/trend grounding before writing.
+        if self.tool_client.enabled:
+            events = ctx.events_by_code.get(ctx.complaint.product_code, [])
+            specs, captured = retrieval_tool_specs(
+                self.retrieval_agent, ctx.complaint.product_code, ctx.events_by_code, [], None
+            )
+            specs = specs + trend_tool_specs(self.trend_analyzer, events)
+            try:
+                result = self.tool_client.run(
+                    system_prompt=system, user_prompt=user, tools=specs, max_tokens=1200
+                )
+                data = result.json_object()
+            except Exception:  # noqa: BLE001 — fall through to the JSON fallback
+                data = {}
+            for item in captured:
+                if getattr(item, "evidence_id", ""):
+                    allowed.add(item.evidence_id)
+
+        # Fallback path: plain JSON completion (no tools) on the augmented client.
+        if not data:
+            llm = getattr(self.extraction_agent, "llm", None)
+            if llm is not None and getattr(llm, "enabled", False):
+                data = llm.complete_json(system_prompt=system, user_prompt=user, fallback={})
+
+        ctx.section_narratives = self._finalize_narratives(ctx, targets, data, allowed)
+        return ctx.section_narratives
+
+    def _narrative_facts(self, ctx: ReportContext) -> "dict[str, str]":
+        """Build the deterministic-facts block the narrative agent must respect."""
+        r = ctx.risk
+        c = ctx.complaint
+        e = ctx.extraction
+        event = c.event_type.lower()
+        reportable = event in {"injury", "death"} or r.risk_bucket == "UNACCEPTABLE"
+        trend = self.ensure_trend(ctx)
+
+        def _txt(value) -> str:
+            text = str(value).strip() if value is not None else ""
+            return text or "Not available"
+
+        return {
+            "product_code": c.product_code,
+            "event_type": c.event_type,
+            "narrative": (c.narrative or "")[:600],
+            "category": _txt(e.qms_complaint_category),
+            "key_issues": ", ".join(e.key_issues) or "None",
+            "risk_bucket": r.risk_bucket,
+            "severity": r.severity_level,
+            "probability": r.probability_level,
+            "escalation_required": str(r.escalation_required),
+            "prrc_required": str(r.prrc_notification_required),
+            "fsca_required": str(r.fsca_required),
+            "reportable": "YES" if reportable else "NO",
+            "hazardous_situation": _txt(r.hazardous_situation),
+            "harm": _txt(r.harm),
+            "iso_14971_rationale": _txt(r.iso_14971_rationale),
+            "trend_direction": _txt(trend.trend_direction),
+            "total_events": str(trend.total_events),
+            "software_events": str(trend.software_problem_events),
+            "latest_year": str(trend.latest_year_events),
+            "previous_year": str(trend.previous_year_events),
+        }
+
+    def _finalize_narratives(
+        self, ctx: ReportContext, targets: List[str], data: "dict", allowed: "set"
+    ) -> "dict[str, str]":
+        """Coerce the model output and enforce citation grounding per section.
+
+        When FDA evidence was available, a narrative that cites none of it is
+        appended with an uncited flag and routed to QM review (Validation Gate 3
+        style), keeping the anti-hallucination guarantee.
+        """
+        finalized: "dict[str, str]" = {}
+        for name in targets:
+            text = str(data.get(name, "")).strip() if isinstance(data, dict) else ""
+            if not text:
+                finalized[name] = "Not available"
+                continue
+            if allowed and not any(token in text for token in allowed):
+                text = f"{text}  (uncited — flagged for QM review)"
+                ctx.review_needed = True
+                reason = f"SectionNarrative '{name}' cites no retrieved FDA record."
+                if reason not in ctx.review_reasons:
+                    ctx.review_reasons.append(reason)
+            finalized[name] = text
+        return finalized
 
     # --- Subquery planning (closes the research-pattern gap) ---------------
     def plan_subqueries(
