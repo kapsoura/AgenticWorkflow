@@ -55,13 +55,13 @@ class AnthropicClient:
         return self._client is not None
 
     @traceable_llm(name="claude.complete_json")
-    def complete_json(self, system_prompt: str, user_prompt: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    def complete_json(self, system_prompt: str, user_prompt: str, fallback: Dict[str, Any], max_tokens: int = 2000) -> Dict[str, Any]:
         if not self._client:
             return fallback
 
         try:
             kwargs = dict(
-                max_tokens=800,
+                max_tokens=max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
