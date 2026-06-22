@@ -33,7 +33,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -251,7 +251,7 @@ def run_demo(complaint_text: str, product_code: str, live: bool = False) -> None
         product_code=product_code,
         manufacturer="Demo Manufacturer",
         event_type="Malfunction",
-        date_received=datetime.utcnow().strftime("%Y%m%d"),
+        date_received=datetime.now(timezone.utc).strftime("%Y%m%d"),
         narrative=complaint_text,
         source_report_number="DEMO-SUBMISSION",
     )
