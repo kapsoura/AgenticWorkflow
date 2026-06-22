@@ -280,6 +280,7 @@ def run_demo(complaint_text: str, product_code: str, live: bool = False) -> None
     evidence: list[RetrievalEvidence] = []
 
     retrieval_agent = RetrievalAgent()  # always needed for orchestrator
+    events = _load_events(product_code)  # always loaded (used by ReportContext + trend)
     if live:
         # Live path: Sai's RetrievalAgent → MCP → live OpenFDA API
         print("  Input : ExtractionOutput + live OpenFDA API via MCP server")
@@ -289,7 +290,6 @@ def run_demo(complaint_text: str, product_code: str, live: bool = False) -> None
         # Offline path: fuzzy-match against pre-ingested SQLite archive
         print("  Input : ExtractedSignal + local SQLite archive")
         print("  Tools : fuzzy-match against MAUDE events & FDA recalls\n")
-        events = _load_events(product_code)
         print(f"  Archive events loaded for {product_code}: {len(events):,}")
         evidence = retrieval_agent.retrieve(
             extracted=extraction,
