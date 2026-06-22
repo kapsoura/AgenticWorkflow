@@ -76,12 +76,23 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# Edit .env — set at minimum:
-#   ANTHROPIC_API_KEY  (for report generation)
-#   OLLAMA_API_BASE    (for extraction — default: http://localhost:11434)
 ```
 
-### 3. Install and start Ollama (Agent 1)
+Open `.env` and fill in the values relevant to your setup:
+
+| Variable | Required for | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Report generation (Agent 4), risk analysis (Agent 2) | Get one at console.anthropic.com |
+| `CLAUDE_CLI_PATH` | All LLM agents via CLI backend | See step 5 below |
+| `OLLAMA_API_BASE` | Extraction via Ollama (Agent 1 variant) | Default: `http://localhost:11434` |
+| `ANTHROPIC_MODEL` | Report generation model | Default: `claude-3-5-sonnet-latest` |
+| `LANGCHAIN_API_KEY` | LangSmith tracing (optional) | Free at smith.langchain.com |
+
+> **Fallback behaviour**: every LLM-backed agent degrades gracefully to deterministic
+> rule-based output when its backend is not configured. The pipeline never hard-crashes —
+> you will see `NOT_AVAILABLE` in LLM fields instead.
+
+### 3. Install and start Ollama (Agent 1 — extraction variant)
 
 ```bash
 # Install from https://ollama.com, then:
@@ -89,14 +100,49 @@ ollama pull mistral-small
 ollama serve
 ```
 
-### 4. Install the OpenFDA MCP Server (Agent 3)
+### 4. Install the OpenFDA MCP Server (Agent 3 — Node.js required)
+
+Agent 3's retrieval tools make all OpenFDA API calls through an MCP server that runs
+as a separate Node.js process. **Node.js ≥ 18 must be installed before this step.**
 
 ```bash
+# Install Node.js 18+ from https://nodejs.org if not already present:
+node --version   # must be v18 or higher
+
+# Clone and build the MCP server:
 git clone https://github.com/Augmented-Nature/OpenFDA-MCP-Server openfda-mcp-server
 cd openfda-mcp-server
 npm install && npm run build
 cd ..
 ```
+
+The Python side (`mcp_client.py`) launches this server automatically as a subprocess
+over stdio — you do **not** need to start it manually unless running `retrieval_agent.py`
+standalone.
+
+### 5. Set up the Claude Code CLI (`claude`) for LLM tool-use
+
+Agents 1, 2, 3, and 4 all use the Claude Code CLI (`claude -p`) as their LLM backend.
+This lets them run without a direct Anthropic API key by routing calls through the CLI.
+
+```bash
+# Install Claude Code CLI (requires Node.js):
+npm install -g @anthropic-ai/claude-code
+
+# Log in:
+claude login
+
+# Find the binary path:
+which claude          # macOS / Linux  → e.g. /usr/local/bin/claude
+(Get-Command claude).Source  # Windows PowerShell → e.g. C:\...\claude.cmd
+
+# Add to .env:
+CLAUDE_CLI_PATH=/usr/local/bin/claude
+ANTHROPIC_MODEL_NAME=haiku   # or sonnet, opus — controls cost vs quality
+```
+
+Once `CLAUDE_CLI_PATH` is set, all agents switch from deterministic fallback to
+full LLM-backed output automatically — no other changes needed.
 
 ---
 
