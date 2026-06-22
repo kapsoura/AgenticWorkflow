@@ -1,0 +1,54 @@
+# =============================================================================
+# Multi-Agent Regulatory Signal Intelligence System — Python dependencies
+# =============================================================================
+# Generated from the actual third-party imports across the codebase.
+# Target: Python 3.10+ (uses `X | None` typing and dataclass features).
+#
+# External (non-pip) requirement:
+#   - The `claude` CLI must be installed and authenticated, with CLAUDE_CLI_PATH
+#     set in `.env`. The project talks to Anthropic through the CLI subprocess
+#     (src/utils/custom_anthropic_client.py), NOT the `anthropic` pip package.
+#     When the CLI is unavailable every agent falls back to deterministic paths.
+#
+# Install:  pip install -r requirements.txt
+# =============================================================================
+
+# --- Web API / service layer (src/api.py, src/pipeline/service.py) -----------
+fastapi>=0.110
+uvicorn[standard]>=0.29        # ASGI server to run the FastAPI app
+python-multipart>=0.0.9        # required by FastAPI for File/Form uploads
+pydantic>=2.6
+
+# --- Configuration / environment ---------------------------------------------
+python-dotenv>=1.0             # loads .env (CLAUDE_CLI_PATH, LANGSMITH keys, …)
+
+# --- Retrieval / text matching (src/agents/retrieval.py) ---------------------
+rapidfuzz>=3.6
+
+# --- Numerics & embeddings ---------------------------------------------------
+numpy>=1.26
+sentence-transformers>=2.7     # BGE narrative embeddings (offline cluster build)
+
+# --- Vector store (src/utils/storage.py) -------------------------------------
+chromadb>=0.5
+
+# --- Clustering & dimensionality reduction (src/pipeline/signal_intelligence_trend.py)
+hdbscan>=0.8.33                # offline HDBSCAN cluster fitting
+umap-learn>=0.5.5              # UMAP projection for the cluster dashboard
+scikit-learn>=1.4             # underpins UMAP/HDBSCAN; nearest-neighbour utils
+
+# --- Word (.docx) report I/O (src/utils/docx_io.py) --------------------------
+python-docx>=1.1
+
+# --- MCP server (optional; src/mcp_server.py, guarded import) -----------------
+mcp>=1.0
+
+# --- Observability (optional; src/observability/langsmith_tracing.py) --------
+langsmith>=0.1
+
+# --- Structured extraction via local Ollama (optional; src/agents/structured_extraction.py)
+langchain-core>=0.2
+langchain-ollama>=0.1
+
+# --- Testing -----------------------------------------------------------------
+pytest>=8.0

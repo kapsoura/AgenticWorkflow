@@ -1,12 +1,15 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.pyc
+**/*.pyc
 *.pyo
 .Python
 
 # Virtual environments
 venv/
 .venv/
+.venv-1/
 env/
 
 # Large data files — re-download via scripts
@@ -17,6 +20,14 @@ data/chromadb/
 
 # Analysis outputs (generated)
 data/analysis/*.json
+
+# Kapil branch paths
+Project/data/*
+Project/outputs/reports/*
+Project/logs/*
+Project/outputs/runtime/chroma/*
+Project/.env
+Project/.langgraph_api/.langgraph_ops.pckl
 
 # Secrets
 .env
@@ -30,3 +41,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Other
+AgenticWorkflow-Mohammad_Ayan_Khan_Data_Extraction/*
+AgenticWorkflow-Sai_Venkat_RetrievalAgent/*
