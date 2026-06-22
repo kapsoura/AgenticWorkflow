@@ -423,7 +423,12 @@ def risk_analysis_agent(state: dict) -> dict:
     modality = state.get("modality") or ""
     past_reports = load_past_reports(failure_mode, modality)
 
-    mode = "LIVE (claude CLI)" if llm.enabled else "OFFLINE (deterministic ISO 14971)"
+    if not llm.enabled:
+        mode = "OFFLINE (deterministic ISO 14971)"
+    elif llm._backend == "api":
+        mode = "LIVE (Anthropic API)"
+    else:
+        mode = "LIVE (claude CLI)"
     print(f"\n{'─' * 64}\n  RISK ANALYSIS AGENT  [{mode}]\n{'─' * 64}")
     print(f"  failure_mode={failure_mode!r} modality={modality!r} "
           f"events={len(state.get('matching_events') or [])} recalls={len(state.get('matching_recalls') or [])} "

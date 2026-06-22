@@ -182,7 +182,7 @@ def run_demo(complaint_text: str, product_code: str) -> None:
     # -- Agent 1: Extraction ---------------------------------------------------
     _hdr("EXTRACTION", "1")
     print("  Input : raw complaint narrative")
-    print("  LLM   : Anthropic Claude CLI (CLAUDE_CLI_PATH) -- falls back to keyword rules\n")
+    print("  LLM   : Anthropic API (ANTHROPIC_API_KEY) or CLI (CLAUDE_CLI_PATH) -- falls back to keyword rules\n")
 
     extraction_agent = ExtractionAgent()
     extraction: ExtractedSignal = extraction_agent.extract(complaint)
