@@ -279,6 +279,7 @@ def run_demo(complaint_text: str, product_code: str, live: bool = False) -> None
 
     evidence: list[RetrievalEvidence] = []
 
+    retrieval_agent = RetrievalAgent()  # always needed for orchestrator
     if live:
         # Live path: Sai's RetrievalAgent → MCP → live OpenFDA API
         print("  Input : ExtractionOutput + live OpenFDA API via MCP server")
@@ -290,7 +291,6 @@ def run_demo(complaint_text: str, product_code: str, live: bool = False) -> None
         print("  Tools : fuzzy-match against MAUDE events & FDA recalls\n")
         events = _load_events(product_code)
         print(f"  Archive events loaded for {product_code}: {len(events):,}")
-        retrieval_agent = RetrievalAgent()
         evidence = retrieval_agent.retrieve(
             extracted=extraction,
             complaint_product_code=product_code,
