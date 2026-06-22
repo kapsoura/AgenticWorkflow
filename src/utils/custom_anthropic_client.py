@@ -261,11 +261,13 @@ class CustomAnthropicClient:
         try:
             proc = subprocess.run(
                 cmd,
-                input=prompt,
-                text=True,
+                input=prompt.encode("utf-8"),
                 capture_output=True,
                 timeout=_CLI_TIMEOUT_SECONDS,
             )
+            # Decode bytes → str after the fact so Windows cp1252 stdin is bypassed
+            proc.stdout = proc.stdout.decode("utf-8", errors="replace")
+            proc.stderr = proc.stderr.decode("utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             elapsed = time.monotonic() - start
             print(f"[claude -p] TIMEOUT after {elapsed:.2f}s")
