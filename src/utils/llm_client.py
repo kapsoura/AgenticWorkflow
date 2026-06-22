@@ -29,8 +29,8 @@ class AnthropicClient:
     changes are needed when switching between them.
     """
 
-    def __init__(self, model: str = "claude-3-5-sonnet-latest"):
-        self.model = model
+    def __init__(self, model: str = ""):
+        self.model = model or os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
         self._client = None
         self._backend = "disabled"
 
