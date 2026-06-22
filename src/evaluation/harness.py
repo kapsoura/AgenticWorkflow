@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from src.config import PROJECT_ROOT
 from src.evaluation import metrics
 from src.evaluation.gold import GoldCase, load_gold_cases
-from src.pipeline.schemas import SignalReport, validate_handoff
+from src.pipeline.schemas import SignalReport, validate_signal_handoff as validate_handoff
 
 
 DEFAULT_K = 5

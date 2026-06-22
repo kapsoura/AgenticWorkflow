@@ -226,3 +226,144 @@ def validate_handoff(stage_name: str, payload: dict) -> BaseModel:
     if model_cls is None:
         raise ValueError(f"Unknown stage: {stage_name}. Valid: {list(schema_map.keys())}")
     return model_cls.model_validate(payload)
+
+
+# ─── Kapil / Report-Generation Agent schemas (dataclasses) ───────────────────
+
+from dataclasses import dataclass, field as dc_field
+from typing import Any, Dict, List as TypingList
+
+
+ALLOWED_RISK_BUCKETS = {"ACCEPTABLE", "ALARP", "UNACCEPTABLE"}
+
+
+@dataclass
+class Complaint:
+    complaint_id: str
+    product_code: str
+    manufacturer: str
+    event_type: str
+    date_received: str
+    narrative: str
+    source_report_number: str
+    ground_truth_problems: TypingList[str] = dc_field(default_factory=list)
+
+
+@dataclass
+class ExtractedSignal:
+    complaint_id: str
+    qms_complaint_category: str
+    key_issues: TypingList[str]
+    confidence: float
+    safety_flags: Dict[str, bool]
+    iso_13485_clauses: TypingList[str] = dc_field(default_factory=list)
+    iso_14971_hazard_tags: TypingList[str] = dc_field(default_factory=list)
+
+
+@dataclass
+class RetrievalEvidence:
+    evidence_id: str
+    source_type: str
+    product_code: str
+    snippet: str
+    score: float
+    metadata: Dict[str, Any] = dc_field(default_factory=dict)
+
+
+@dataclass
+class RiskAssessment:
+    complaint_id: str
+    severity_level: str
+    probability_level: str
+    risk_bucket: str
+    escalation_required: bool
+    prrc_notification_required: bool
+    capa_recommendation: str
+    report_type: str
+    iso_14971_rationale: str
+    hazardous_situation: str = ""
+    harm: str = ""
+    severity_rationale: str = ""
+    probability_rationale: str = ""
+    evidence_basis: TypingList[Dict[str, Any]] = dc_field(default_factory=list)
+    uncertainty: str = ""
+    capa_immediate: str = ""
+    capa_investigation: str = ""
+    capa_corrective: str = ""
+    capa_preventive: str = ""
+    capa_verification: str = ""
+    capa_effectiveness: str = ""
+    capa_precedent: str = ""
+    fsca_required: bool = False
+    llm_backed: bool = False
+
+
+@dataclass
+class TrendSummary:
+    product_code: str
+    total_events: int
+    software_problem_events: int
+    latest_year_events: int
+    previous_year_events: int
+    trend_direction: str
+    trend_rationale: str = ""
+
+
+@dataclass
+class SignalReport:
+    report_id: str
+    created_at: str
+    trace_id: str
+    complaint: Complaint
+    extraction: ExtractedSignal
+    retrieval: TypingList[RetrievalEvidence]
+    risk: RiskAssessment
+    trend: TrendSummary
+    report_type: str
+    orchestrator_questions: TypingList[str]
+    report_markdown: str
+    review_needed: bool = False
+    review_reasons: TypingList[str] = dc_field(default_factory=list)
+    quality: Dict[str, Any] = dc_field(default_factory=dict)
+
+
+@dataclass
+class PipelineRunResult:
+    run_id: str
+    started_at: datetime
+    completed_at: datetime
+    selected_product_codes: TypingList[str]
+    processed_complaints: int
+    generated_report_paths: TypingList[str]
+    generated_trace_paths: TypingList[str] = dc_field(default_factory=list)
+
+
+def validate_signal_handoff(stage_name: str, payload: Any) -> TypingList[str]:
+    """Validate a signal-pipeline payload; returns a list of error strings (empty = valid).
+    Used by the report-generation harness (Kapil's agent).
+    """
+    errors: TypingList[str] = []
+    if stage_name == "extraction":
+        if not isinstance(payload, ExtractedSignal):
+            return ["Extraction payload has wrong type"]
+        if not payload.qms_complaint_category:
+            errors.append("qms_complaint_category is required")
+        if not payload.key_issues:
+            errors.append("key_issues must not be empty")
+        if not (0.0 <= payload.confidence <= 1.0):
+            errors.append("confidence must be in range [0,1]")
+    elif stage_name == "retrieval":
+        if not isinstance(payload, list):
+            return ["Retrieval payload has wrong type"]
+        for idx, item in enumerate(payload):
+            if not isinstance(item, RetrievalEvidence):
+                errors.append(f"retrieval[{idx}] has wrong type")
+                continue
+            if not (0.0 <= item.score <= 1.0):
+                errors.append(f"retrieval[{idx}].score must be in range [0,1]")
+    elif stage_name == "risk":
+        if not isinstance(payload, RiskAssessment):
+            return ["Risk payload has wrong type"]
+        if payload.risk_bucket not in ALLOWED_RISK_BUCKETS:
+            errors.append("risk_bucket must be ACCEPTABLE, ALARP, or UNACCEPTABLE")
+    return errors
