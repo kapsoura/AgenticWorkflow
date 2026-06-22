@@ -120,7 +120,7 @@ class RetrievalAgent:
         # ── Source 3: ChromaDB vector search ─────────────────────────────────
         if vector_collection is not None and (issues or subqueries):
             queries      = subqueries or [" ".join(sorted(issues))]
-            seen_ids: set = set()
+            seen_vector_ids: set = set()
             for sub in queries:
                 if not sub.strip():
                     continue
@@ -134,9 +134,9 @@ class RetrievalAgent:
                     metas = result.get("metadatas",   [[]])[0]
                     for idx, doc in enumerate(docs):
                         vid = ids[idx]
-                        if vid in seen_ids:
+                        if vid in seen_vector_ids:
                             continue
-                        seen_ids.add(vid)
+                        seen_vector_ids.add(vid)
                         meta = dict(metas[idx]) if idx < len(metas) else {}
                         meta["subquery"] = sub
                         scored.append(
