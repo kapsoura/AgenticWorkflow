@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, Dict
 
@@ -17,20 +18,34 @@ class LLMResult:
 
 
 class AnthropicClient:
-    """Small wrapper so agents can use Claude via the `claude` CLI (no API key).
+    """Wrapper that routes LLM calls through whichever backend is available.
 
-    Backed by ``CustomAnthropicClient``, which shells out to ``claude -p``. When
-    ``CLAUDE_CLI_PATH`` is unset (so the CLI client cannot be constructed) the
-    wrapper stays disabled and every agent falls back to its offline heuristic.
+    Priority:
+      1. Direct Anthropic API  — when ANTHROPIC_API_KEY is set (fastest, no subprocess)
+      2. Claude Code CLI       — when CLAUDE_CLI_PATH is set (no API key needed)
+      3. Disabled              — every agent falls back to its offline heuristic
     """
 
     def __init__(self, model: str = "claude-3-5-sonnet-latest"):
         self.model = model
         self._client = None
-        try:
-            self._client = CustomAnthropicClient()
-        except Exception:
-            self._client = None
+        self._backend = "disabled"
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if api_key:
+            try:
+                import anthropic
+                self._client = anthropic.Anthropic(api_key=api_key).messages
+                self._backend = "api"
+            except Exception:
+                pass
+
+        if self._client is None:
+            try:
+                self._client = CustomAnthropicClient()
+                self._backend = "cli"
+            except Exception:
+                self._client = None
 
     @property
     def enabled(self) -> bool:
@@ -42,12 +57,14 @@ class AnthropicClient:
             return fallback
 
         try:
-            response = self._client.messages.create(
+            kwargs = dict(
                 max_tokens=800,
-                temperature=0,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            if self._backend == "api":
+                kwargs["model"] = self.model
+            response = self._client.create(**kwargs)
             text = ""
             for block in response.content:
                 block_text = getattr(block, "text", "")
@@ -75,12 +92,14 @@ class AnthropicClient:
     @traceable_llm(name="claude.complete_text")
     def _complete_text(self, system_prompt: str, user_prompt: str, fallback: str = "") -> str:
         try:
-            response = self._client.messages.create(
+            kwargs = dict(
                 max_tokens=4000,
-                temperature=0,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
             )
+            if self._backend == "api":
+                kwargs["model"] = self.model
+            response = self._client.create(**kwargs)
             text = ""
             for block in response.content:
                 block_text = getattr(block, "text", "")
