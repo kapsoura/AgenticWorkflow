@@ -24,6 +24,9 @@ class AnthropicClient:
       1. Direct Anthropic API  — when ANTHROPIC_API_KEY is set (fastest, no subprocess)
       2. Claude Code CLI       — when CLAUDE_CLI_PATH is set (no API key needed)
       3. Disabled              — every agent falls back to its offline heuristic
+
+    Both backends expose the same .messages.create() interface so no call-site
+    changes are needed when switching between them.
     """
 
     def __init__(self, model: str = "claude-3-5-sonnet-latest"):
@@ -35,7 +38,7 @@ class AnthropicClient:
         if api_key:
             try:
                 import anthropic
-                self._client = anthropic.Anthropic(api_key=api_key).messages
+                self._client = anthropic.Anthropic(api_key=api_key)
                 self._backend = "api"
             except Exception:
                 pass
@@ -64,7 +67,7 @@ class AnthropicClient:
             )
             if self._backend == "api":
                 kwargs["model"] = self.model
-            response = self._client.create(**kwargs)
+            response = self._client.messages.create(**kwargs)
             text = ""
             for block in response.content:
                 block_text = getattr(block, "text", "")
@@ -80,11 +83,7 @@ class AnthropicClient:
             return fallback
 
     def complete_text(self, system_prompt: str, user_prompt: str, fallback: str = "") -> str:
-        """Return a plain-text completion (no JSON parsing).
-
-        Used by the report agent's optimizer step, where the model returns a full
-        revised markdown document rather than a JSON envelope.
-        """
+        """Return a plain-text completion (no JSON parsing)."""
         if not self._client:
             return fallback
         return self._complete_text(system_prompt, user_prompt, fallback)
@@ -99,7 +98,7 @@ class AnthropicClient:
             )
             if self._backend == "api":
                 kwargs["model"] = self.model
-            response = self._client.create(**kwargs)
+            response = self._client.messages.create(**kwargs)
             text = ""
             for block in response.content:
                 block_text = getattr(block, "text", "")
