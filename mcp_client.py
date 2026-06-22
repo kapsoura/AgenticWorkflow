@@ -179,6 +179,16 @@ class OpenFDAMCPClient:
 
             # Handle JSON-RPC error
             if "error" in response:
+                err_msg = str(response["error"])
+                # MCP server throws on 404 (no results) — treat as empty
+                if "No results found" in err_msg:
+                    return {
+                        "success": True,
+                        "source":  "mcp",
+                        "total":   0,
+                        "data":    {},
+                        "error":   None,
+                    }
                 raise RuntimeError(
                     f"MCP server error: {response['error']}"
                 )
