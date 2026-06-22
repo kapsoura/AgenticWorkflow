@@ -4,6 +4,9 @@ langchain>=0.3.0
 langchain-ollama>=0.3.0
 python-dotenv>=1.0.0
 
+# Anthropic / LLM
+anthropic>=0.30
+
 # Embeddings
 sentence-transformers>=3.0.0
 torch>=2.0.0
@@ -12,13 +15,20 @@ torch>=2.0.0
 scikit-learn>=1.4.0
 hdbscan>=0.8.33
 umap-learn>=0.5.5
-numpy>=1.26.0
+numpy>=1.26.0,<3
 
-# Database
+# Database / Vector Store
 # sqlite3 is stdlib - no install needed
+chromadb>=0.5
+
+# Data
+pandas>=2.2,<3
 
 # HTTP
 requests>=2.31.0
+
+# UI
+streamlit>=1.35
 
 # Utilities
 tqdm>=4.66.0
