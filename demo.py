@@ -132,7 +132,84 @@ def _db_stats() -> dict:
         return {}
 
 
-def run_demo(complaint_text: str, product_code: str) -> None:
+def _run_live_retrieval(complaint, extraction, product_code: str) -> list:
+    """Call Sai's RetrievalAgent (MCP -> live OpenFDA) and convert to RetrievalEvidence."""
+    try:
+        # Sai's agent lives at the repo root and uses Mohammad's ExtractionOutput schema
+        from retrieval_agent import RetrievalAgent as LiveRetrievalAgent
+        from schemas import (
+            ExtractionOutput as Ext, Modality, EventType as ET,
+            SeverityLevel, QMSCategory,
+        )
+        from src.pipeline.schemas import RetrievalEvidence
+    except ImportError as e:
+        print(f"  [warn] Live retrieval import failed: {e}")
+        print("  [warn] Falling back to offline archive.")
+        return []
+
+    # Map qms_complaint_category string -> QMSCategory enum
+    _cat = {
+        "SW-FUNC": QMSCategory.SW_FUNC, "SW-ALGO": QMSCategory.SW_ALGO,
+        "SW-DATA": QMSCategory.SW_DATA,  "IMG-QUAL": QMSCategory.IMG_QUAL,
+        "HW-FAIL": QMSCategory.HW_MECH,  "HW-MECH": QMSCategory.HW_MECH,
+    }
+    # Map product_code -> Modality enum
+    _mod = {
+        "LNH": Modality.MRI, "JAK": Modality.CT, "IYE": Modality.CT,
+        "LLZ": Modality.ULTRASOUND, "IZL": Modality.XRAY,
+        "MQB": Modality.MOLECULAR,  "GKZ": Modality.UNKNOWN,
+        "QKO": Modality.MOLECULAR,
+    }
+    key_issues = list(extraction.key_issues or [])
+    failure_mode = key_issues[0] if key_issues else "device malfunction"
+
+    ext_output = Ext(
+        report_id=complaint.complaint_id,
+        modality=_mod.get(product_code, Modality.UNKNOWN),
+        manufacturer=complaint.manufacturer or "Unknown",
+        device_model=MODALITY_NAMES.get(product_code, product_code),
+        component="device subsystem",
+        failure_mode=failure_mode,
+        symptom=key_issues[1] if len(key_issues) > 1 else failure_mode,
+        event_type=ET.MALFUNCTION,
+        severity_indicator=SeverityLevel.S3,
+        software_related="SW" in (extraction.qms_complaint_category or ""),
+        is_safety_related=bool((extraction.safety_flags or {}).get("mentions_patient_harm")),
+        usability_concern=False,
+        security_concern=False,
+        qms_complaint_category=_cat.get(extraction.qms_complaint_category, QMSCategory.UNKNOWN),
+        patient_impact=complaint.narrative[:100],
+        confidence=extraction.confidence,
+    )
+
+    try:
+        agent = LiveRetrievalAgent()
+        output = agent.run(ext_output)
+    except Exception as e:
+        print(f"  [warn] Live retrieval failed: {e}")
+        return []
+
+    # Convert RetrievalOutput -> List[RetrievalEvidence]
+    evidence = []
+    for ev in output.similar_events:
+        evidence.append(RetrievalEvidence(
+            evidence_id=ev.report_id,
+            source_type="MAUDE_EVENT",
+            snippet=ev.narrative_snippet,
+            score=ev.similarity_score,
+        ))
+    for rec in output.matched_recalls:
+        evidence.append(RetrievalEvidence(
+            evidence_id=rec.recall_id or rec.firm,
+            source_type="FDA_RECALL",
+            snippet=(rec.reason_for_recall or "")[:200],
+            score=0.9,
+            metadata={"root_cause": rec.root_cause, "firm": rec.firm},
+        ))
+    return evidence
+
+
+def run_demo(complaint_text: str, product_code: str, live: bool = False) -> None:
     product_code = product_code.upper()
     device_name = MODALITY_NAMES.get(product_code, product_code)
 
@@ -199,20 +276,28 @@ def run_demo(complaint_text: str, product_code: str) -> None:
 
     # -- Agent 3: Retrieval ----------------------------------------------------
     _hdr("RETRIEVAL", "3")
-    print("  Input : ExtractedSignal + local SQLite archive")
-    print("  Tools : fuzzy-match against MAUDE events & FDA recalls\n")
 
-    events = _load_events(product_code)
-    print(f"  Archive events loaded for {product_code}: {len(events):,}")
+    evidence: list[RetrievalEvidence] = []
 
-    retrieval_agent = RetrievalAgent()
-    evidence: list[RetrievalEvidence] = retrieval_agent.retrieve(
-        extracted=extraction,
-        complaint_product_code=product_code,
-        events_by_code={product_code: events},
-        recalls=[],
-        top_k=5,
-    )
+    if live:
+        # Live path: Sai's RetrievalAgent → MCP → live OpenFDA API
+        print("  Input : ExtractionOutput + live OpenFDA API via MCP server")
+        print("  Tools : LLM tool planner -> search_adverse_events, search_recalls, ...\n")
+        evidence = _run_live_retrieval(complaint, extraction, product_code)
+    else:
+        # Offline path: fuzzy-match against pre-ingested SQLite archive
+        print("  Input : ExtractedSignal + local SQLite archive")
+        print("  Tools : fuzzy-match against MAUDE events & FDA recalls\n")
+        events = _load_events(product_code)
+        print(f"  Archive events loaded for {product_code}: {len(events):,}")
+        retrieval_agent = RetrievalAgent()
+        evidence = retrieval_agent.retrieve(
+            extracted=extraction,
+            complaint_product_code=product_code,
+            events_by_code={product_code: events},
+            recalls=[],
+            top_k=5,
+        )
 
     print(f"  Evidence retrieved : {len(evidence)} items")
     for i, ev in enumerate(evidence, 1):
@@ -320,6 +405,13 @@ def main() -> None:
         choices=list(MODALITY_NAMES.keys()),
         help="FDA product code (default: LNH = MRI System)",
     )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        default=False,
+        help="Use live OpenFDA API via MCP server (Agent 3 real-time path). "
+             "Requires openfda-mcp-server/ built next to this file.",
+    )
     args = parser.parse_args()
 
     product_code = args.product_code.upper()
@@ -328,7 +420,7 @@ def main() -> None:
         SAMPLE_COMPLAINTS["LNH"],
     )
 
-    run_demo(complaint_text, product_code)
+    run_demo(complaint_text, product_code, live=args.live)
 
 
 if __name__ == "__main__":
