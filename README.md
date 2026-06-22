@@ -148,7 +148,60 @@ full LLM-backed output automatically — no other changes needed.
 
 ## Running the Pipeline
 
-### Full pipeline via FastAPI (all 4 agents)
+### Demo — all 4 agents in one command (recommended)
+
+```bash
+python demo.py                          # offline — uses pre-ingested SQLite archive
+python demo.py --product-code JAK       # CT Scanner variant
+python demo.py --live                   # live OpenFDA API via MCP (see setup below)
+```
+
+**What each run shows:**
+
+| Agent | Output |
+|---|---|
+| 1 — Extraction | LLM classifies complaint → QMS category, confidence, ISO 13485 clauses |
+| 3 — Retrieval | Fuzzy-match against 9,840 FDA MAUDE events (offline) or live OpenFDA API |
+| 2 — Risk | Two-pass ISO 14971:2019 assessment → severity × probability → ACCEPTABLE / ALARP / UNACCEPTABLE |
+| 4 — Report | LLM drafts PSUR / CAPA / Incident report + self-critique loop flags weak citations |
+
+**Supported device types:**
+
+| `--product-code` | Device |
+|---|---|
+| `LNH` (default) | MRI System |
+| `JAK` | CT Scanner |
+| `LLZ` | Ultrasound |
+| `IYE` | CT X-ray |
+| `IZL` | Digital X-ray |
+| `MQB` | Molecular Dx Instrument |
+| `GKZ` | Hematology Analyzer |
+| `QKO` | PCR System |
+
+**Live MCP setup** (required only for `--live`):
+
+```bash
+# Clone and build the OpenFDA MCP server next to the project:
+git clone https://github.com/Augmented-Nature/OpenFDA-MCP-Server openfda-mcp-server
+cd openfda-mcp-server
+npm install && npm run build
+cd ..
+
+# Then run:
+python demo.py --live
+```
+
+The `--live` flag switches Agent 3 from the offline SQLite archive to real-time FDA data
+via Sai's MCP client (`mcp_client.py` → `node openfda-mcp-server/build/index.js` subprocess).
+No separate terminal needed — the Node.js process is launched and managed automatically.
+
+**`Review Needed: YES` is expected behaviour** — the self-critique loop intentionally flags
+sections where LLM claims lack grounded FDA citations, so a human QM officer can review
+before sign-off. This is the evaluator-optimizer loop working as designed.
+
+---
+
+### Full pipeline via FastAPI (all 4 agents, web UI)
 
 ```bash
 cd Project
@@ -163,27 +216,19 @@ curl -X POST http://127.0.0.1:8000/analyze \
   -d '{"narrative": "MRI system showed banding artifacts during cardiac sequence", "product_code": "LNH"}'
 ```
 
-### Agent 1 only — Extraction + Trend Analysis (Ollama, no Anthropic key needed)
+### Agent 1 only — Extraction + Trend Analysis
 
 ```bash
-# Process a single complaint
 python main.py --complaint "MRI system showed banding artifacts during cardiac sequence"
-
-# Run full extraction pipeline on the local FDA database
-python main.py --full
-
-# Show database statistics
-python main.py --stats
+python main.py --full    # full extraction pipeline on the local FDA database
+python main.py --stats   # database statistics
 ```
 
 ### Agent 3 only — Retrieval smoke test
 
 ```bash
-# Start the MCP server first (in a separate terminal):
-node openfda-mcp-server/build/index.js
-
-# Then run the retrieval agent:
-python retrieval_agent.py
+python mcp_client.py      # smoke test: calls all 4 OpenFDA tools and prints results
+python retrieval_agent.py # full standalone Agent 3 run with mock ExtractionOutput
 ```
 
 ### Run all tests
