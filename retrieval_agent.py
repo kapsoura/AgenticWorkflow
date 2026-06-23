@@ -718,7 +718,6 @@ def retrieval_node(state: PipelineState) -> PipelineState:
 if __name__ == "__main__":
     print("=" * 55)
     print("retrieval_agent.py — smoke test")
-    print("Owner: Pothukanuri Sai Venkat")
     print("=" * 55)
 
     from schemas import (

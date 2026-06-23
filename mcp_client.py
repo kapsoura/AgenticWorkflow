@@ -1,7 +1,6 @@
-"""
+/in"""
 mcp_client.py
 OpenFDA MCP Client — Python bridge to the OpenFDA MCP Server
-Owner : Pothukanuri Sai Venkat
 Team  : IISc Bangalore · Deep Learning · June 2026
 
 Source: https://github.com/Augmented-Nature/OpenFDA-MCP-Server

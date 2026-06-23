@@ -1,8 +1,6 @@
 """
 mcp_server.py
 MCP Tool Server — Retrieval Agent (Agent 3)
-Owner : Pothukanuri Sai Venkat (Venkat)
-Email : saivenkatp@iisc.ac.in
 Team  : IISc Bangalore · Deep Learning · June 2026
 
 Exposes three tools that external agents or the orchestrator
@@ -394,7 +392,6 @@ class MCPServer:
 if __name__ == "__main__":
     print("=" * 55)
     print("mcp_server.py — smoke test")
-    print("Owner: Pothukanuri Sai Venkat")
     print("=" * 55)
 
     mcp = MCPServer()
