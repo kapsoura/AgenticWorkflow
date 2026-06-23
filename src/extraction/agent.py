@@ -7,6 +7,7 @@ Uses LangChain + ChatOllama for local LLM inference.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -47,17 +48,32 @@ class ExtractionAgent:
         """
         Args:
             model: Ollama model name (e.g., "mistral-small", "qwen3:32b", "phi4").
+                   Ignored when ANTHROPIC_API_KEY is set (Anthropic backend used instead).
             temperature: Low temperature for deterministic extraction.
-            base_url: Ollama server URL.
+            base_url: Ollama server URL. Ignored when ANTHROPIC_API_KEY is set.
         """
-        self.llm = ChatOllama(
-            model=model,
-            temperature=temperature,
-            base_url=base_url,
-            format="json",
-            num_ctx=2048,
-            num_predict=512,
-        )
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+        if anthropic_key:
+            # Cloud deployments have no local Ollama server to reach — use the
+            # Anthropic API instead. The extraction prompt already requires a
+            # raw JSON response, so no provider-specific JSON mode is needed.
+            from langchain_anthropic import ChatAnthropic
+
+            self.llm = ChatAnthropic(
+                model=os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
+                temperature=temperature,
+                api_key=anthropic_key,
+                max_tokens=512,
+            )
+        else:
+            self.llm = ChatOllama(
+                model=model,
+                temperature=temperature,
+                base_url=base_url,
+                format="json",
+                num_ctx=2048,
+                num_predict=512,
+            )
         self._system_prompt = _load_prompt("extraction")
         self._reflection_prompt = _load_prompt("reflection")
 

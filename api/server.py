@@ -21,7 +21,12 @@ app = FastAPI(title="Signal Intelligence API", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "https://kapsoura.github.io",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -406,5 +411,6 @@ def analyze_complaint_endpoint(
 
 
 if __name__ == "__main__":
+    import os
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
