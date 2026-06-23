@@ -69,7 +69,9 @@ class OrchestrationAgent:
         """
         event = complaint.event_type.lower()
         evidence = evidence or []
-        recall_precedent = any(getattr(e, "source_type", "") == "FDA_RECALL" for e in evidence)
+        recall_precedent = any(
+            getattr(e, "source_type", "") in {"FDA_RECALL", "FDA_RECALL_LIVE"} for e in evidence
+        )
 
         selected: List[str] = []
         # Incident Assessment: MDR serious-incident path.

@@ -228,6 +228,27 @@
   font-family: ui-monospace, monospace;
 }
 
+.downloadBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  padding: 0.4rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.downloadBtn:hover {
+  border-color: #4f46e5;
+  color: #4f46e5;
+}
+
 .badges {
   display: flex;
   gap: 0.4rem;
