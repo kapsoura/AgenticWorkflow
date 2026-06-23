@@ -29,6 +29,11 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "https://kapsoura.github.io",
     ],
+    # Vercel assigns a new random per-deployment URL on every preview deploy
+    # (e.g. multi-agent-quality-intellience-3xwmj18qm.vercel.app), in addition
+    # to the stable production alias. Matching by pattern avoids having to
+    # update this allowlist on every deploy.
+    allow_origin_regex=r"https://multi-agent-quality-intellience.*\.vercel\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
