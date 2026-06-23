@@ -41,15 +41,42 @@ export interface TemplatesResponse {
   blueprints: Record<string, BlueprintSection[]>;
 }
 
+export interface SimilarEvent {
+  report_number: string;
+  similarity_score: number;
+  narrative_snippet?: string | null;
+  product_code?: string | null;
+  manufacturer?: string | null;
+  device_name?: string | null;
+  date_received?: number | string | null;
+}
+
+export interface RecallEvidence {
+  recall_number: string;
+  reason_for_recall: string;
+  root_cause?: string | null;
+  classification?: string | null;
+  recalling_firm?: string | null;
+  recall_date?: number | string | null;
+}
+
 export interface AnalyzeResponse {
   report_id: string;
   report_type: string;
   risk_bucket: string;
+  risk?: {
+    bucket: string;
+    method: 'llm' | 'heuristic';
+    signals: string[];
+    rationale: string;
+  };
   extraction: Record<string, unknown>;
+  extraction_status?: { ok: boolean; reason?: string; message?: string };
   evidence_count: number;
+  recalls?: RecallEvidence[];
   sections: { name: string; title: string; content: string }[];
   validation: { passed: boolean; issues: string[] };
-  cluster?: Record<string, unknown>;
+  cluster?: Record<string, unknown> & { similar_events?: SimilarEvent[] };
   total_duration_ms?: number;
 }
 

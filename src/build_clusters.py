@@ -1,7 +1,7 @@
 """Offline cluster-index build.
 
 Rebuilds the reference cluster index over the archive already in
-``signal_intelligence_ml.db``:
+``data/signal_intelligence.db``:
 
     narratives -> BGE embeddings -> HDBSCAN clusters (+ UMAP) -> persisted
 
@@ -10,9 +10,9 @@ Run once (and whenever the archive changes):
     python -m src.build_clusters
 
 The resulting ``embeddings.npz`` + ``clusters`` table are what the online
-``ClusterAssignmentAgent`` loads to assign each incoming complaint to an
-existing cluster. Embeddings are BGE-large (not the 32-dim hash) so the index
-and the live query embeddings share the same space.
+``ClusterAssignmentAgent`` / ``TrendAnalyzer`` load to assign each incoming
+complaint to an existing cluster. Embeddings are BGE-large (not the 32-dim
+hash) so the index and the live query embeddings share the same space.
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ import time
 
 import numpy as np
 
-from src.pipeline.signal_intelligence_db import get_narratives, init_db
-from src.pipeline.signal_intelligence_embeddings import EMBEDDINGS_FILE, EmbeddingGenerator
-from src.pipeline.signal_intelligence_trend import TrendAnalyzer
+from src.embeddings.generator import EMBEDDINGS_FILE, EmbeddingGenerator
+from src.pipeline.database import get_narratives, init_db
+from src.trend.analyzer import TrendAnalyzer
 
 
 def main() -> int:
@@ -42,7 +42,7 @@ def main() -> int:
     report_numbers = [r["report_number"] for r in rows]
     total = len(narratives)
     if total == 0:
-        print("ERROR: no narratives in the ML DB to embed.")
+        print("ERROR: no narratives in signal_intelligence.db to embed.")
         return 1
 
     print(f"Embedding {total} narratives with BGE ...")
@@ -67,10 +67,12 @@ def main() -> int:
     n_noise = sum(1 for c in labels if c == -1)
     print(f"HDBSCAN: {n_clusters} clusters, {n_noise} noise points")
 
-    analyzer.save_labels()
+    # UMAP projection is cached to disk by compute_umap(); save_clusters_to_db
+    # writes the per-event cluster_id labels back to the events table plus the
+    # clusters metadata table.
     analyzer.compute_umap()
     analyzer.save_clusters_to_db(conn)
-    print("Saved clusters + per-event labels to DB/disk. Done.")
+    print("Saved clusters + per-event labels + UMAP projection. Done.")
     return 0
 
 

@@ -238,6 +238,32 @@ export default function Analyze() {
                 )}
               </div>
 
+              {result.extraction_status && !result.extraction_status.ok && (
+                <div className={styles.warnBanner}>
+                  <AlertTriangle size={14} />
+                  <span>{result.extraction_status.message}</span>
+                </div>
+              )}
+
+              {result.risk && (
+                <div className={styles.riskBlock}>
+                  <h4>
+                    Risk Analysis
+                    <span className={styles.riskMethod}>
+                      {result.risk.method === 'llm' ? 'LLM severity' : 'heuristic'}
+                    </span>
+                  </h4>
+                  <p className={styles.riskRationale}>{result.risk.rationale}</p>
+                  {result.risk.signals.length > 0 && (
+                    <ul className={styles.signalList}>
+                      {result.risk.signals.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {result.extraction && (
                 <details className={styles.details}>
                   <summary>Extraction Output</summary>
@@ -251,6 +277,56 @@ export default function Analyze() {
                 <div className={styles.infoRow}>
                   <span>Evidence Retrieved:</span>
                   <strong>{result.evidence_count} items</strong>
+                </div>
+              )}
+
+              {result.cluster?.similar_events && result.cluster.similar_events.length > 0 && (
+                <div className={styles.evidenceBlock}>
+                  <h4>Retrieved Similar Events</h4>
+                  {result.cluster.similar_events.map((ev, i) => (
+                    <div key={i} className={styles.evidenceCard}>
+                      <div className={styles.evidenceHead}>
+                        <span className={styles.evidenceId}>{ev.report_number}</span>
+                        <span className={styles.evidenceScore}>
+                          {(ev.similarity_score * 100).toFixed(1)}% match
+                        </span>
+                      </div>
+                      {(ev.manufacturer || ev.product_code) && (
+                        <div className={styles.evidenceMeta}>
+                          {[ev.manufacturer, ev.product_code, ev.date_received]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </div>
+                      )}
+                      {ev.narrative_snippet && (
+                        <p className={styles.evidenceText}>{ev.narrative_snippet}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {result.recalls && result.recalls.length > 0 && (
+                <div className={styles.evidenceBlock}>
+                  <h4>Related FDA Recalls (openFDA)</h4>
+                  {result.recalls.map((rc, i) => (
+                    <div key={i} className={styles.evidenceCard}>
+                      <div className={styles.evidenceHead}>
+                        <span className={styles.evidenceId}>{rc.recall_number}</span>
+                        {rc.classification && (
+                          <span className={styles.recallClass}>{rc.classification}</span>
+                        )}
+                      </div>
+                      {(rc.recalling_firm || rc.recall_date) && (
+                        <div className={styles.evidenceMeta}>
+                          {[rc.recalling_firm, rc.recall_date].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                      {rc.reason_for_recall && (
+                        <p className={styles.evidenceText}>{rc.reason_for_recall}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
 

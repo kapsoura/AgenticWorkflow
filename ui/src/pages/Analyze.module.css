@@ -389,3 +389,120 @@
 .validationIssues li {
   margin-bottom: 0.3rem;
 }
+
+/* ─── Risk analysis + retrieval/recall evidence ─────────────────────── */
+
+.warnBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  color: var(--warn);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.riskBlock {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.8rem 0.9rem;
+  background: var(--panel-2);
+}
+
+.riskBlock h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+
+.riskMethod {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.riskRationale {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+
+.signalList {
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.signalList li {
+  margin-bottom: 0.25rem;
+}
+
+.evidenceBlock h4 {
+  font-size: 0.88rem;
+  margin-bottom: 0.5rem;
+  color: var(--accent);
+}
+
+.evidenceCard {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.5rem;
+  background: var(--panel-2);
+}
+
+.evidenceHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.evidenceId {
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+
+.evidenceScore {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.recallClass {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: var(--bad);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.evidenceMeta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.evidenceText {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}

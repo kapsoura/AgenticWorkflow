@@ -49,6 +49,62 @@ def get_pipeline():
     return _pipeline
 
 
+# Anthropic multi-agent stack (lazy init) — used for the INTERACTIVE analyze path.
+# Ollama (via the Pipeline above) is reserved strictly for the batch extraction job.
+_agents = None
+
+
+def get_agents():
+    """Return the Anthropic-backed interactive agents (extraction + ISO 14971 risk).
+
+    These route through ``AnthropicClient`` (Claude CLI / Anthropic API), never
+    Ollama. Construction is cheap — no model server is contacted until ``.extract``
+    / ``.assess`` is called.
+    """
+    global _agents
+    if _agents is None:
+        from src.agents.extraction import ExtractionAgent as AnthropicExtractionAgent
+        from src.agents.risk_analysis import RiskAnalysisAgent
+        _agents = {
+            "extraction": AnthropicExtractionAgent(),
+            "risk": RiskAnalysisAgent(),
+        }
+    return _agents
+
+
+def _interactive_extract(narrative: str, report_id: str, product_code: Optional[str] = None) -> dict:
+    """Run interactive extraction through the Anthropic agent (never Ollama).
+
+    Returns a JSON-safe dict. On failure / when the LLM client is disabled the
+    returned dict carries an ``error`` key so callers can surface a graceful
+    status to the UI.
+    """
+    import dataclasses
+    from src.pipeline.schemas import Complaint
+
+    complaint = Complaint(
+        complaint_id=report_id,
+        product_code=product_code or "",
+        manufacturer="Unknown",
+        event_type="Malfunction",
+        date_received="",
+        narrative=narrative,
+        source_report_number=report_id,
+    )
+    agent = get_agents()["extraction"]
+    try:
+        signal = agent.extract(complaint)
+        data = dataclasses.asdict(signal)
+        if signal.qms_complaint_category == "NOT_AVAILABLE":
+            data["error"] = (
+                getattr(agent, "last_fallback_reason", None)
+                or "Anthropic LLM client not enabled (set CLAUDE_CLI_PATH or ANTHROPIC_API_KEY)."
+            )
+        return data
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 class ComplaintRequest(BaseModel):
     narrative: str
     report_id: str = "UI-001"
@@ -87,25 +143,27 @@ def process_complaint(req: ComplaintRequest):
     pipeline = get_pipeline()
     steps = []
 
-    # Step 1: Extraction (optional)
+    # Step 1: Extraction (optional) — Anthropic agent only; Ollama is batch-only
     t0 = time.time()
     if not req.skip_extraction:
         try:
-            extraction = pipeline.extractor.extract(
-                narrative=req.narrative,
-                report_id=req.report_id,
+            extraction_data = _interactive_extract(
+                req.narrative, req.report_id, req.product_code
             )
-            extraction_data = extraction.model_dump()
-            # Convert enums to strings for JSON
-            for k, v in extraction_data.items():
-                if hasattr(v, "value"):
-                    extraction_data[k] = v.value
-            steps.append(StepResult(
-                step="extraction",
-                status="success",
-                duration_ms=round((time.time() - t0) * 1000, 1),
-                data=extraction_data,
-            ))
+            if extraction_data.get("error"):
+                steps.append(StepResult(
+                    step="extraction",
+                    status="error",
+                    duration_ms=round((time.time() - t0) * 1000, 1),
+                    data={"error": extraction_data["error"]},
+                ))
+            else:
+                steps.append(StepResult(
+                    step="extraction",
+                    status="success",
+                    duration_ms=round((time.time() - t0) * 1000, 1),
+                    data=extraction_data,
+                ))
         except Exception as e:
             steps.append(StepResult(
                 step="extraction",
@@ -258,18 +316,21 @@ def process_complaint_stream(req: ComplaintRequest):
         t0 = time.time()
         if not req.skip_extraction:
             try:
-                extraction = pipeline.extractor.extract(
-                    narrative=req.narrative, report_id=req.report_id
+                extraction_data = _interactive_extract(
+                    req.narrative, req.report_id, req.product_code
                 )
-                extraction_data = extraction.model_dump()
-                for k, v in extraction_data.items():
-                    if hasattr(v, "value"):
-                        extraction_data[k] = v.value
-                yield _sse("step", {
-                    "step": "extraction", "status": "success",
-                    "duration_ms": round((time.time() - t0) * 1000, 1),
-                    "data": extraction_data,
-                })
+                if extraction_data.get("error"):
+                    yield _sse("step", {
+                        "step": "extraction", "status": "error",
+                        "duration_ms": round((time.time() - t0) * 1000, 1),
+                        "data": {"error": extraction_data["error"]},
+                    })
+                else:
+                    yield _sse("step", {
+                        "step": "extraction", "status": "success",
+                        "duration_ms": round((time.time() - t0) * 1000, 1),
+                        "data": extraction_data,
+                    })
             except Exception as e:
                 yield _sse("step", {
                     "step": "extraction", "status": "error",
@@ -541,6 +602,194 @@ def templates():
         return {"section_catalog": [], "blueprints": {}}
 
 
+# ─── Analytics (deterministic dashboard aggregations over the real archive) ──
+_analytics_cache: Optional[dict] = None
+
+
+def _analytics_data() -> dict:
+    """Build (events_by_code, recalls) from ``data/signal_intelligence.db`` in the
+    shape ``src.analytics`` expects. Cached — the archive is static at runtime.
+    """
+    global _analytics_cache
+    if _analytics_cache is None:
+        from collections import defaultdict
+        conn = get_connection()
+        try:
+            problems_by_event: dict = defaultdict(list)
+            for r in conn.execute(
+                "SELECT event_id, problem_code FROM event_problems"
+            ).fetchall():
+                problems_by_event[r["event_id"]].append(r["problem_code"])
+
+            by_code: dict = defaultdict(list)
+            for r in conn.execute(
+                "SELECT id, date_received, event_type, product_code, manufacturer FROM events"
+            ).fetchall():
+                by_code[r["product_code"] or "Unknown"].append({
+                    "date_received": str(r["date_received"] or ""),
+                    "event_type": r["event_type"],
+                    "device": [{"manufacturer_d_name": r["manufacturer"]}],
+                    "product_problems": problems_by_event.get(r["id"], []),
+                })
+
+            recall_count = conn.execute("SELECT COUNT(*) FROM recalls").fetchone()[0]
+            recalls = [{} for _ in range(int(recall_count))]
+        finally:
+            conn.close()
+        _analytics_cache = {"events_by_code": dict(by_code), "recalls": recalls}
+    return _analytics_cache
+
+
+@app.get("/api/analytics/stats")
+def analytics_stats():
+    """Headline dashboard counts computed deterministically over the real archive."""
+    from src.analytics import compute_stats
+    from src.config import SQLITE_DB_PATH
+
+    data = _analytics_data()
+    return compute_stats(data["events_by_code"], data["recalls"], SQLITE_DB_PATH)
+
+
+@app.get("/api/analytics/trends")
+def analytics_trends(
+    dimension: str = "product_code",
+    product_code: Optional[str] = None,
+    event_type: Optional[str] = None,
+    software_related: Optional[bool] = None,
+    top_n: int = 12,
+):
+    """Aggregate one allow-listed dimension into a chart-ready series."""
+    from src.analytics import compute_trends
+    from src.config import SQLITE_DB_PATH
+
+    data = _analytics_data()
+    filters = {
+        "product_code": product_code,
+        "event_type": event_type,
+        "software_related": software_related,
+    }
+    try:
+        return compute_trends(
+            data["events_by_code"], SQLITE_DB_PATH, dimension, filters, top_n=top_n
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+# ─── Analyze helpers (retrieval / recalls / risk) ───────────────────────────
+
+# Map LLM severity hints to ISO 14971 risk buckets used across the UI.
+_SEVERITY_TO_BUCKET = {
+    "critical": "UNACCEPTABLE",
+    "high": "UNACCEPTABLE",
+    "severe": "UNACCEPTABLE",
+    "serious": "UNACCEPTABLE",
+    "medium": "ALARP",
+    "moderate": "ALARP",
+    "low": "ACCEPTABLE",
+    "minor": "ACCEPTABLE",
+    "none": "ACCEPTABLE",
+}
+_SEVERE_KEYWORDS = (
+    "death", "died", "fatal", "deceased", "life-threatening", "life threatening",
+    "permanent impairment", "permanent damage",
+)
+_MODERATE_KEYWORDS = (
+    "injury", "injured", "harm", "burn", "infection", "bleeding", "hemorrhage",
+    "hospitaliz", "surgery", "adverse", "overdose", "overexposure",
+)
+
+
+def _enrich_similar_events(conn, similar_events: list, limit: int = 5) -> list:
+    """Attach real narrative snippets + device context to retrieved events."""
+    enriched = []
+    for ev in similar_events[:limit]:
+        row = conn.execute(
+            "SELECT narrative, product_code, manufacturer, device_name, date_received "
+            "FROM events WHERE report_number = ?",
+            (ev.get("report_number"),),
+        ).fetchone()
+        narrative = (row["narrative"] if row and row["narrative"] else "") or ""
+        snippet = (narrative[:220] + "…") if len(narrative) > 220 else narrative
+        enriched.append({
+            **ev,
+            "narrative_snippet": snippet or None,
+            "product_code": row["product_code"] if row else None,
+            "manufacturer": row["manufacturer"] if row else None,
+            "device_name": row["device_name"] if row else None,
+            "date_received": row["date_received"] if row else None,
+        })
+    return enriched
+
+
+def _related_recalls(conn, product_code: Optional[str], limit: int = 5) -> list:
+    """Pull openFDA recalls for the same product code as supporting evidence."""
+    if not product_code:
+        return []
+    rows = conn.execute(
+        "SELECT recall_number, reason_for_recall, root_cause, classification, "
+        "recalling_firm, recall_date FROM recalls WHERE product_code = ? "
+        "ORDER BY recall_date DESC LIMIT ?",
+        (product_code, limit),
+    ).fetchall()
+    out = []
+    for r in rows:
+        reason = (r["reason_for_recall"] or "")
+        out.append({
+            "recall_number": r["recall_number"],
+            "reason_for_recall": (reason[:240] + "…") if len(reason) > 240 else reason,
+            "root_cause": r["root_cause"],
+            "classification": r["classification"],
+            "recalling_firm": r["recalling_firm"],
+            "recall_date": r["recall_date"],
+        })
+    return out
+
+
+def _assess_risk(narrative: str, extraction_data: dict, cluster_data: dict, recalls: list):
+    """
+    Produce a risk bucket + human-readable signals.
+
+    Prefers the LLM extraction severity when available; otherwise falls back to
+    a transparent heuristic over narrative keywords, cluster trend and recall
+    context so the report is still meaningful when the LLM is offline.
+    """
+    signals: list[str] = []
+    bucket: Optional[str] = None
+    used_llm = bool(extraction_data) and not extraction_data.get("error")
+
+    sev = (extraction_data or {}).get("severity_indicator") if used_llm else None
+    if sev:
+        mapped = _SEVERITY_TO_BUCKET.get(str(sev).lower())
+        if mapped:
+            bucket = mapped
+            signals.append(f"LLM severity indicator: '{sev}'")
+
+    text = (narrative or "").lower()
+    if any(k in text for k in _SEVERE_KEYWORDS):
+        signals.append("Narrative reports death or life-threatening outcome")
+        bucket = "UNACCEPTABLE"
+    elif bucket in (None, "ACCEPTABLE") and any(k in text for k in _MODERATE_KEYWORDS):
+        signals.append("Narrative reports patient injury or harm")
+        bucket = "ALARP"
+
+    trend = (cluster_data or {}).get("trend_flag")
+    if trend in ("increasing", "emerging"):
+        signals.append(f"Cluster trend is '{trend}' (rising signal volume)")
+        if bucket in (None, "ACCEPTABLE"):
+            bucket = "ALARP"
+
+    if recalls:
+        signals.append(f"{len(recalls)} related FDA recall(s) for this product code")
+        if bucket in (None, "ACCEPTABLE"):
+            bucket = "ALARP"
+
+    if bucket is None:
+        bucket = "ALARP" if signals else "ACCEPTABLE"
+
+    return bucket, signals, ("llm" if used_llm else "heuristic")
+
+
 @app.post("/api/analyze")
 def analyze_complaint_endpoint(
     narrative: str,
@@ -548,29 +797,65 @@ def analyze_complaint_endpoint(
     event_type: str = "Malfunction",
     manufacturer: str = "Unknown",
 ):
-    """Run complaint through the pipeline and return structured results."""
+    """Run a complaint through the INTERACTIVE agent stack and return structured results.
+
+    Interactive extraction + ISO 14971 risk run through the Anthropic agents
+    (``AnthropicClient`` → Claude CLI / Anthropic API). Ollama is NOT used here;
+    it is reserved for the batch extraction job. Retrieval + cluster assignment
+    use the prebuilt BGE index over ``data/signal_intelligence.db``.
+    """
     if not narrative.strip():
         raise HTTPException(400, "Narrative cannot be empty")
 
-    pipeline = get_pipeline()
-    t0 = time.time()
-    result: dict = {"report_id": f"UI-{int(time.time())}", "steps": []}
+    import dataclasses
+    from src.pipeline.schemas import Complaint, RetrievalEvidence
 
-    # Extraction
-    extraction_data = {}
+    pipeline = get_pipeline()
+    agents = get_agents()
+    t0 = time.time()
+    report_id = f"UI-{int(time.time())}"
+
+    complaint = Complaint(
+        complaint_id=report_id,
+        product_code=product_code,
+        manufacturer=manufacturer,
+        event_type=event_type,
+        date_received="",
+        narrative=narrative,
+        source_report_number=report_id,
+    )
+
+    # ── Extraction (Anthropic agent) ──────────────────────────────────────
+    extraction_agent = agents["extraction"]
+    extracted_signal = None
+    extraction_data: dict = {}
     try:
-        extraction = pipeline.extractor.extract(
-            narrative=narrative, report_id=result["report_id"]
-        )
-        extraction_data = extraction.model_dump()
-        for k, v in extraction_data.items():
-            if hasattr(v, "value"):
-                extraction_data[k] = v.value
-    except Exception as e:
+        extracted_signal = extraction_agent.extract(complaint)
+        extraction_data = dataclasses.asdict(extracted_signal)
+    except Exception as e:  # noqa: BLE001
         extraction_data = {"error": str(e)}
 
-    # Embedding + cluster
-    cluster_data = {}
+    extraction_available = (
+        extracted_signal is not None
+        and extracted_signal.qms_complaint_category != "NOT_AVAILABLE"
+    )
+    if extraction_available:
+        extraction_status = {"ok": True, "backend": extraction_agent.last_backend}
+    else:
+        extraction_status = {
+            "ok": False,
+            "reason": "llm_unavailable",
+            "backend": getattr(extraction_agent, "last_backend", "unavailable"),
+            "message": (
+                getattr(extraction_agent, "last_fallback_reason", None)
+                or "Anthropic LLM client not enabled (set CLAUDE_CLI_PATH or "
+                "ANTHROPIC_API_KEY in .env). Risk below uses a transparent "
+                "heuristic over retrieval, cluster trend and recall context."
+            ),
+        }
+
+    # ── Embedding + cluster assignment (BGE index over the real archive) ──
+    cluster_data: dict = {}
     try:
         embedding = pipeline.embedder.embed_single(narrative)
         similarity = pipeline.trend_analyzer.assign_complaint(
@@ -580,17 +865,108 @@ def analyze_complaint_endpoint(
         for k, v in cluster_data.items():
             if hasattr(v, "value"):
                 cluster_data[k] = v.value
-    except Exception as e:
+        if cluster_data.get("similar_events"):
+            cluster_data["similar_events"] = _enrich_similar_events(
+                pipeline.conn, cluster_data["similar_events"]
+            )
+    except Exception as e:  # noqa: BLE001
         cluster_data = {"error": str(e)}
+
+    # ── openFDA recalls for the same product code (supporting evidence) ───
+    recalls = _related_recalls(pipeline.conn, product_code)
+
+    # ── Build evidence bundle for the risk agent ──────────────────────────
+    evidence: list = []
+    for ev in cluster_data.get("similar_events", []) or []:
+        evidence.append(RetrievalEvidence(
+            evidence_id=str(ev.get("report_number") or "event"),
+            source_type="MAUDE_EVENT",
+            product_code=ev.get("product_code") or product_code,
+            snippet=ev.get("narrative_snippet") or "",
+            score=float(ev.get("similarity_score") or 0.0),
+            metadata={
+                "manufacturer": ev.get("manufacturer"),
+                "device_name": ev.get("device_name"),
+                "date_received": ev.get("date_received"),
+            },
+        ))
+    for rc in recalls:
+        evidence.append(RetrievalEvidence(
+            evidence_id=str(rc.get("recall_number") or "recall"),
+            source_type="FDA_RECALL",
+            product_code=product_code,
+            snippet=rc.get("reason_for_recall") or "",
+            score=1.0,
+            metadata={
+                "classification": rc.get("classification"),
+                "root_cause": rc.get("root_cause"),
+                "recalling_firm": rc.get("recalling_firm"),
+                "recall_date": rc.get("recall_date"),
+            },
+        ))
+
+    # ── Risk assessment (Anthropic ISO 14971 agent, heuristic fallback) ──
+    risk_agent = agents["risk"]
+    assessment = None
+    try:
+        assessment = risk_agent.assess(
+            complaint=complaint,
+            evidence=evidence,
+            extraction=extracted_signal,
+            trend=None,
+        )
+    except Exception:  # noqa: BLE001 — fall back to heuristic below
+        assessment = None
+
+    report_type = "PSUR"
+    if assessment is not None and assessment.llm_backed:
+        risk_bucket = assessment.risk_bucket
+        report_type = assessment.report_type or report_type
+        risk_signals = [s for s in (
+            f"Severity {assessment.severity_level} / probability {assessment.probability_level}",
+            f"Hazardous situation: {assessment.hazardous_situation}" if assessment.hazardous_situation else "",
+            "Escalation required" if assessment.escalation_required else "",
+            "PRRC notification required" if assessment.prrc_notification_required else "",
+            f"{len(recalls)} related FDA recall(s)" if recalls else "",
+        ) if s]
+        risk_block = {
+            "bucket": risk_bucket,
+            "method": "anthropic",
+            "signals": risk_signals,
+            "rationale": assessment.iso_14971_rationale
+            or "ISO 14971 assessment produced by the risk-analysis agent.",
+            "severity_level": assessment.severity_level,
+            "probability_level": assessment.probability_level,
+            "escalation_required": assessment.escalation_required,
+            "prrc_notification_required": assessment.prrc_notification_required,
+            "capa_recommendation": assessment.capa_recommendation,
+            "hazardous_situation": assessment.hazardous_situation,
+            "harm": assessment.harm,
+        }
+    else:
+        # LLM risk unavailable → transparent heuristic over narrative/cluster/recalls.
+        risk_bucket, heur_signals, _ = _assess_risk(
+            narrative, extraction_data, cluster_data, recalls
+        )
+        risk_block = {
+            "bucket": risk_bucket,
+            "method": "heuristic",
+            "signals": heur_signals,
+            "rationale": "; ".join(heur_signals) if heur_signals
+            else "No elevated-risk signals detected from narrative, cluster trend or recalls.",
+        }
 
     total_ms = round((time.time() - t0) * 1000, 1)
 
     return {
-        "report_id": result["report_id"],
-        "report_type": "PSUR",
-        "risk_bucket": extraction_data.get("severity_indicator", "UNKNOWN"),
+        "report_id": report_id,
+        "report_type": report_type,
+        "risk_bucket": risk_block["bucket"],
+        "risk": risk_block,
         "extraction": extraction_data,
+        "extraction_status": extraction_status,
         "evidence_count": len(cluster_data.get("similar_events", [])),
+        "recalls": recalls,
         "sections": [],
         "validation": {"passed": True, "issues": []},
         "cluster": cluster_data,
