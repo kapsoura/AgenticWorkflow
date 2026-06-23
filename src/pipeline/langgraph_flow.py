@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 
 from src.agents.archive_trend import ArchiveTrendAnalyzer
 from src.agents.extraction import ExtractionAgent
+from src.agents.guardrail import GuardrailAgent
 from src.agents.orchestration import OrchestrationAgent
 from src.agents.report_generation import ReportGenerationAgent
 from src.agents.retrieval import RetrievalAgent
@@ -56,15 +57,6 @@ class WorkflowState(TypedDict, total=False):
 
 class LangGraphSignalWorkflow:
     MIN_RETRIEVAL_SCORE = 0.3
-    _INJECTION_PATTERNS = (
-        "ignore previous instructions",
-        "ignore all instructions",
-        "system prompt",
-        "developer mode",
-        "jailbreak",
-        "disregard your rules",
-    )
-    _UNSUPPORTED_CLAIM_TERMS = ("guaranteed", "definitive", "certain", "proven")
 
     def __init__(self):
         self.extraction_agent = ExtractionAgent()
@@ -72,6 +64,7 @@ class LangGraphSignalWorkflow:
         self.risk_agent = RiskAnalysisAgent()
         self.report_agent = ReportGenerationAgent()
         self.trend_agent = ArchiveTrendAnalyzer()
+        self.guardrail_agent = GuardrailAgent()
         self.orchestrator_agent = OrchestrationAgent(
             extraction_agent=self.extraction_agent,
             retrieval_agent=self.retrieval_agent,
@@ -131,13 +124,9 @@ class LangGraphSignalWorkflow:
     def _input_guardrail(self, state: WorkflowState) -> WorkflowState:
         self._check_deadline(state)
         started = monotonic()
-        narrative = state["complaint"].narrative.lower()
-        reasons = [
-            "InputGuardrail: potential prompt-injection pattern detected"
-            for pattern in self._INJECTION_PATTERNS
-            if pattern in narrative
-        ]
-        passed = len(reasons) == 0
+        verdict = self.guardrail_agent.check_input(state["complaint"].narrative)
+        passed = verdict.passed
+        reasons = list(verdict.reasons)
 
         self._trace(
             state,
@@ -145,7 +134,7 @@ class LangGraphSignalWorkflow:
             event="completed",
             gate_result="pass" if passed else "review",
             latency_ms=(monotonic() - started) * 1000.0,
-            metadata={"reasons": reasons},
+            metadata={"reasons": reasons, "available": verdict.available},
         )
         return {
             "input_guardrail_pass": passed,
@@ -456,18 +445,9 @@ class LangGraphSignalWorkflow:
         review_reasons: List[str] = []
 
         for report in reports:
-            report_reasons: List[str] = []
-            report_text = report.report_markdown.lower()
             evidence_ids = [item.evidence_id for item in report.retrieval]
-            has_citation_id = any(eid.lower() in report_text for eid in evidence_ids)
-
-            if any(term in report_text for term in self._UNSUPPORTED_CLAIM_TERMS):
-                report_reasons.append("OutputGuardrail: unsupported high-certainty claim language detected")
-
-            high_risk = report.risk.risk_bucket in {"ALARP", "UNACCEPTABLE"}
-            regulatory_claim = "reportable serious incident" in report_text or "regulatory notification" in report_text
-            if (high_risk or regulatory_claim) and not has_citation_id:
-                report_reasons.append("OutputGuardrail: citation completeness failed for risk/regulatory claim")
+            verdict = self.guardrail_agent.check_output(report.report_markdown, evidence_ids)
+            report_reasons = list(verdict.reasons)
 
             if report_reasons:
                 report.review_needed = True

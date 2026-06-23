@@ -354,6 +354,15 @@
   color: #4f46e5;
 }
 
+.downloadNote {
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .details {
   border: 1px solid var(--border);
   border-radius: 8px;
