@@ -63,6 +63,7 @@ export interface RecallEvidence {
 export interface AnalyzeResponse {
   report_id: string;
   report_type: string;
+  applicable_report_types?: string[];
   risk_bucket: string;
   risk?: {
     bucket: string;
