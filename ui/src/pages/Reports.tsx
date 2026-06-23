@@ -95,9 +95,11 @@ export default function Reports() {
       <div className={styles.downloadNote}>
         <Download size={16} />
         <span>
-          To download a generated report, use the <strong>Analyze</strong> page
-          and click <strong>Download Reports (ZIP)</strong> to save the three
-          separate Word reports (PSUR, Incident Assessment, CAPA).
+          To download a generated report, use the <strong>Analyze</strong> page.
+          Click <strong>Download Reports (ZIP)</strong> for all three Word
+          reports at once, or use the individual <strong>PSUR</strong>,{' '}
+          <strong>Incident Assessment</strong> and <strong>CAPA</strong> buttons
+          to download each report separately.
         </span>
       </div>
     </div>
