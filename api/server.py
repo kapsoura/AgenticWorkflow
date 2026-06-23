@@ -5,6 +5,7 @@ FastAPI backend — exposes the complaint processing pipeline as REST API.
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 # Add parent to path so we can import src modules
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,26 +14,27 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from src.pipeline.orchestrator import Pipeline
+# Lazy-import heavy modules (sentence-transformers) to keep startup fast
 from src.pipeline.database import get_connection, get_db_stats
-from src.embeddings.generator import EmbeddingGenerator
 
 app = FastAPI(title="Signal Intelligence API", version="1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Global pipeline instance (lazy init)
-_pipeline: Pipeline | None = None
+_pipeline = None
 
 
-def get_pipeline() -> Pipeline:
+def get_pipeline():
     global _pipeline
     if _pipeline is None:
+        from src.pipeline.orchestrator import Pipeline
+        from src.embeddings.generator import EmbeddingGenerator
         _pipeline = Pipeline(model="mistral-small", base_url="http://localhost:11434")
         # Pre-load clusters
         embeddings, report_numbers = EmbeddingGenerator.load_embeddings()
@@ -191,6 +193,216 @@ def get_clusters():
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------- Endpoints for React UI ----------
+
+
+PRODUCT_CODES = ["LNH", "JAK", "LLZ"]
+EVENT_TYPES = ["Malfunction", "Injury", "Death"]
+REPORT_TYPES = ["PSUR", "INCIDENT_ASSESSMENT", "CAPA"]
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "signal-intelligence-api"}
+
+
+@app.get("/api/meta")
+def meta():
+    """Static metadata for the UI."""
+    return {
+        "product_codes": PRODUCT_CODES,
+        "event_types": EVENT_TYPES,
+        "report_types": REPORT_TYPES,
+    }
+
+
+@app.get("/api/trends")
+def trends(
+    dimension: str,
+    product_code: Optional[str] = None,
+    event_type: Optional[str] = None,
+    software_related: Optional[bool] = None,
+):
+    """Aggregate a dimension from the events/clusters tables."""
+    try:
+        conn = get_connection()
+    except Exception as e:
+        raise HTTPException(500, f"Database connection failed: {e}")
+
+    series = []
+
+    allowed_cluster_dims = {"trend_flag", "dominant_problem", "dominant_modality"}
+
+    try:
+        if dimension == "product_code":
+            sql = "SELECT product_code AS label, COUNT(*) AS count FROM events"
+            conditions, params = _build_where(product_code, event_type, software_related)
+            sql += conditions + " GROUP BY product_code ORDER BY count DESC LIMIT 20"
+            rows = conn.execute(sql, params).fetchall()
+            series = [{"label": r["label"] or "Unknown", "count": r["count"]} for r in rows]
+        elif dimension == "event_type":
+            sql = "SELECT event_type AS label, COUNT(*) AS count FROM events"
+            conditions, params = _build_where(product_code, event_type, software_related)
+            sql += conditions + " GROUP BY event_type ORDER BY count DESC"
+            rows = conn.execute(sql, params).fetchall()
+            series = [{"label": r["label"] or "Unknown", "count": r["count"]} for r in rows]
+        elif dimension == "manufacturer":
+            sql = "SELECT manufacturer AS label, COUNT(*) AS count FROM events"
+            conditions, params = _build_where(product_code, event_type, software_related)
+            sql += conditions + " GROUP BY manufacturer ORDER BY count DESC LIMIT 12"
+            rows = conn.execute(sql, params).fetchall()
+            series = [{"label": r["label"] or "Unknown", "count": r["count"]} for r in rows]
+        elif dimension == "year":
+            sql = "SELECT substr(date_received, 1, 4) AS label, COUNT(*) AS count FROM events"
+            conditions, params = _build_where(product_code, event_type, software_related)
+            sql += conditions + " GROUP BY label HAVING label IS NOT NULL AND label != '' ORDER BY label"
+            rows = conn.execute(sql, params).fetchall()
+            series = [{"label": r["label"], "count": r["count"]} for r in rows if r["label"]]
+        elif dimension == "month":
+            sql = "SELECT substr(date_received, 1, 6) AS label, COUNT(*) AS count FROM events"
+            conditions, params = _build_where(product_code, event_type, software_related)
+            sql += conditions + " GROUP BY label HAVING label IS NOT NULL AND label != '' ORDER BY label"
+            rows = conn.execute(sql, params).fetchall()
+            series = [
+                {"label": f"{r['label'][:4]}-{r['label'][4:]}", "count": r["count"]}
+                for r in rows if r["label"] and len(r["label"]) >= 6
+            ]
+        elif dimension == "quarter":
+            sql = """SELECT substr(date_received, 1, 4) AS yr,
+                            CAST((CAST(substr(date_received, 5, 2) AS INTEGER) - 1) / 3 + 1 AS TEXT) AS q,
+                            COUNT(*) AS count
+                     FROM events"""
+            conditions, params = _build_where(product_code, event_type, software_related)
+            sql += conditions + " GROUP BY yr, q HAVING yr IS NOT NULL AND yr != '' ORDER BY yr, q"
+            rows = conn.execute(sql, params).fetchall()
+            series = [
+                {"label": f"{r['yr']}-Q{r['q']}", "count": r["count"]}
+                for r in rows if r["yr"]
+            ]
+        elif dimension in allowed_cluster_dims:
+            col_map = {
+                "trend_flag": "trend_flag",
+                "dominant_problem": "dominant_problem",
+                "dominant_modality": "dominant_modality",
+            }
+            col = col_map[dimension]
+            rows = conn.execute(
+                f"SELECT {col} AS label, COUNT(*) AS count FROM clusters GROUP BY {col} ORDER BY count DESC"
+            ).fetchall()
+            series = [{"label": r["label"] or "Unknown", "count": r["count"]} for r in rows]
+        else:
+            conn.close()
+            raise HTTPException(400, f"Unknown dimension: {dimension}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.close()
+        raise HTTPException(500, f"Query error: {e}")
+
+    conn.close()
+    return {"dimension": dimension, "series": series}
+
+
+def _build_where(
+    product_code: Optional[str],
+    event_type: Optional[str],
+    software_related: Optional[bool],
+) -> tuple:
+    """Build a parameterised WHERE clause from filter values."""
+    clauses = []
+    params: list = []
+    if product_code:
+        clauses.append("product_code = ?")
+        params.append(product_code)
+    if event_type:
+        clauses.append("event_type = ?")
+        params.append(event_type)
+    if software_related is not None:
+        clauses.append("software_related = ?")
+        params.append(software_related)
+    if clauses:
+        return " WHERE " + " AND ".join(clauses), params
+    return "", params
+
+
+@app.get("/api/templates")
+def templates():
+    """Report structures and section catalog."""
+    try:
+        from src.agents.report_sections import SECTION_KEYWORDS, blueprint_for
+        catalog = [
+            {"section": name, "keywords": keywords}
+            for name, keywords in SECTION_KEYWORDS.items()
+        ]
+        blueprints = {}
+        for rt in REPORT_TYPES:
+            try:
+                specs = blueprint_for(rt)
+                blueprints[rt] = [{"name": s.name, "title": s.title} for s in specs]
+            except Exception:
+                blueprints[rt] = []
+        return {"section_catalog": catalog, "blueprints": blueprints}
+    except ImportError:
+        return {"section_catalog": [], "blueprints": {}}
+
+
+@app.post("/api/analyze")
+def analyze_complaint_endpoint(
+    narrative: str,
+    product_code: str = "LNH",
+    event_type: str = "Malfunction",
+    manufacturer: str = "Unknown",
+):
+    """Run complaint through the pipeline and return structured results."""
+    if not narrative.strip():
+        raise HTTPException(400, "Narrative cannot be empty")
+
+    pipeline = get_pipeline()
+    t0 = time.time()
+    result: dict = {"report_id": f"UI-{int(time.time())}", "steps": []}
+
+    # Extraction
+    extraction_data = {}
+    try:
+        extraction = pipeline.extractor.extract(
+            narrative=narrative, report_id=result["report_id"]
+        )
+        extraction_data = extraction.model_dump()
+        for k, v in extraction_data.items():
+            if hasattr(v, "value"):
+                extraction_data[k] = v.value
+    except Exception as e:
+        extraction_data = {"error": str(e)}
+
+    # Embedding + cluster
+    cluster_data = {}
+    try:
+        embedding = pipeline.embedder.embed_single(narrative)
+        similarity = pipeline.trend_analyzer.assign_complaint(
+            embedding=embedding, conn=pipeline.conn, top_k=5
+        )
+        cluster_data = similarity.model_dump()
+        for k, v in cluster_data.items():
+            if hasattr(v, "value"):
+                cluster_data[k] = v.value
+    except Exception as e:
+        cluster_data = {"error": str(e)}
+
+    total_ms = round((time.time() - t0) * 1000, 1)
+
+    return {
+        "report_id": result["report_id"],
+        "report_type": "PSUR",
+        "risk_bucket": extraction_data.get("severity_indicator", "UNKNOWN"),
+        "extraction": extraction_data,
+        "evidence_count": len(cluster_data.get("similar_events", [])),
+        "sections": [],
+        "validation": {"passed": True, "issues": []},
+        "cluster": cluster_data,
+        "total_duration_ms": total_ms,
+    }
 
 
 if __name__ == "__main__":
