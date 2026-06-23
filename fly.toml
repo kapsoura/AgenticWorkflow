@@ -1,0 +1,40 @@
+# Fly.io app config for the FastAPI backend (api/server.py).
+# `app` must be globally unique on Fly — change it if `fly launch` says it's taken.
+app = "signal-intel-api"
+primary_region = "iad"
+
+[build]
+
+[env]
+PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+# Measured locally: loading BAAI/bge-large-en-v1.5 and running one encode()
+# peaks at ~1.4GB RSS for the Python process alone (see chat history — this
+# was an actual measurement, not an estimate). Add FastAPI/sklearn/OS
+# overhead and realistic peak in the container is ~1.6-1.8GB. This only loads
+# on the first /api/analyze or /api/process request (Analyze page) — the rest
+# of the API (stats/trends/clusters/templates) never touches it.
+# 2GB is the hard ceiling for shared-cpu-1x (Fly rejects anything higher on
+# this CPU class) — it has some real margin per the measurement above, but
+# not a lot. swap_size_mb is a free disk-backed safety net for a one-off
+# spike over the limit (slow if it actually triggers, but better than an
+# OOM-kill). If `fly logs` shows OOM kills anyway, the real fix is
+# `size = "shared-cpu-2x"` (unlocks up to 4GB) — costs more.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"
+  swap_size_mb = 512

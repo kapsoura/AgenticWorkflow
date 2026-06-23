@@ -1,4 +1,6 @@
-const BASE_URL = '';
+// Empty string in dev (Vite proxies /api and /health to the local FastAPI server,
+// see vite.config.ts). Set at build time for production deploys, e.g. a Fly.io URL.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export interface StatsResponse {
   total_events: number;

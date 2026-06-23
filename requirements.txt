@@ -6,6 +6,7 @@ python-dotenv>=1.0.0
 
 # Anthropic / LLM
 anthropic>=0.30
+langchain-anthropic>=0.3.0
 
 # Embeddings
 sentence-transformers>=3.0.0

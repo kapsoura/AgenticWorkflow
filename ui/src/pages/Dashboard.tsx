@@ -118,7 +118,7 @@ export default function Dashboard() {
               </Pie>
               <Tooltip
                 contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                formatter={(value: number, name: string) => [`${value.toLocaleString()} events`, name]}
+                formatter={(value, name) => [`${Number(value ?? 0).toLocaleString()} events`, name]}
               />
               <Legend
                 layout="vertical"
