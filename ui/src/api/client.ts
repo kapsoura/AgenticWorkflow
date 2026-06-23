@@ -65,9 +65,10 @@ export interface AnalyzeResponse {
   report_type: string;
   applicable_report_types?: string[];
   risk_bucket: string;
+  guardrail?: { available?: boolean; input_rejected: boolean; reasons: string[] };
   risk?: {
     bucket: string;
-    method: 'anthropic' | 'deterministic' | 'unavailable';
+    method: 'anthropic' | 'deterministic' | 'unavailable' | 'guardrail';
     report_type?: string;
     signals: string[];
     rationale: string;

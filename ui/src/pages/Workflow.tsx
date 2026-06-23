@@ -13,7 +13,6 @@ import {
   Play,
   AlertTriangle,
   Settings,
-  Download,
   Layers,
   TrendingUp,
 } from 'lucide-react';
@@ -101,28 +100,6 @@ export default function Workflow() {
     } finally {
       setRunning(false);
     }
-  };
-
-  const handleDownload = () => {
-    const report = {
-      report_id: reportId,
-      product_code: productCode,
-      narrative,
-      generated_at: new Date().toISOString(),
-      total_duration_ms: totalMs,
-      steps,
-      cluster,
-      trend,
-    };
-    const blob = new Blob([JSON.stringify(report, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${reportId || 'signal-report'}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const trendFlagClass = (flag?: string) => {
@@ -307,10 +284,9 @@ export default function Workflow() {
               )}
 
               {!running && (
-                <button className={styles.downloadBtn} onClick={handleDownload}>
-                  <Download size={16} />
-                  Download Report (JSON)
-                </button>
+                <div className={styles.downloadNote}>
+                  Use the Analyze page to generate downloadable DOCX reports.
+                </div>
               )}
 
               <details className={styles.details}>

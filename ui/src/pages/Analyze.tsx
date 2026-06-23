@@ -3,7 +3,6 @@ import { Send, AlertTriangle, CheckCircle, FileText, Download } from 'lucide-rea
 import { analyzeComplaint, downloadReportDocx, downloadReportsZip, fetchMeta } from '../api/client';
 import type { AnalyzeResponse } from '../api/client';
 import { useAnalysis } from '../context/AnalysisContext';
-import { buildReportMarkdown } from '../utils/report';
 import Spinner from '../components/Spinner';
 import styles from './Analyze.module.css';
 
@@ -39,14 +38,6 @@ const SAMPLE_NARRATIVES = [
     product_code: 'LNH',
     event_type: 'Malfunction',
     manufacturer: 'Siemens Healthineers',
-  },
-  {
-    label: '⚠ Guardrail: Uncited High-Risk Claim',
-    narrative:
-      'Patient received a definitive radiation overdose during a digital X-ray exam. This is a guaranteed, proven device defect that is certain to recur and cause serious harm on every future scan.',
-    product_code: 'IZL',
-    event_type: 'Injury',
-    manufacturer: 'Unknown',
   },
 ];
 
@@ -103,13 +94,11 @@ export default function Analyze() {
       URL.revokeObjectURL(url);
     };
     try {
-      // Three separate reports (PSUR, Incident Assessment, CAPA) in one .zip.
+      // Three separate DOCX reports (PSUR, Incident Assessment, CAPA) in one .zip.
       const zip = await downloadReportsZip(result, inputsPayload);
       triggerDownload(zip, 'zip');
-    } catch {
-      // Fall back to a client-side Markdown report if the backend is offline.
-      const markdown = buildReportMarkdown(result, inputs);
-      triggerDownload(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), 'md');
+    } catch (err) {
+      alert(`Could not generate reports: ${(err as Error).message}`);
     }
   };
 
@@ -155,6 +144,15 @@ export default function Analyze() {
     types.push('PSUR');
     return types;
   })();
+
+  // Input guardrail rejected the complaint (e.g. prompt injection). No report
+  // was generated, so we show a rejection banner instead of normal results.
+  const rejected =
+    Boolean(result?.guardrail?.input_rejected) || result?.report_type === 'REJECTED';
+
+  // An LLM agent (guardrail / extraction / risk) could not run. We show an
+  // "Agent not available" notice rather than any heuristic output.
+  const agentUnavailable = result?.report_type === 'UNAVAILABLE';
 
   return (
     <div className={styles.page}>
@@ -279,6 +277,43 @@ export default function Analyze() {
 
           {result && (
             <div className={styles.results}>
+              {rejected && (
+                <div className={styles.rejectedBanner}>
+                  <strong>⛔ Rejected by input guardrail</strong>
+                  <p>
+                    The complaint narrative was rejected by the LLM input guardrail
+                    before any analysis. No report was generated.
+                  </p>
+                  {result.guardrail?.reasons?.length ? (
+                    <ul>
+                      {result.guardrail.reasons.map((reason, i) => (
+                        <li key={i}>{reason}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              )}
+
+              {agentUnavailable && (
+                <div className={styles.unavailableBanner}>
+                  <strong>⚠ Agent not available</strong>
+                  <p>
+                    An LLM agent required for this analysis is not configured, so no
+                    result was produced. Set <code>CLAUDE_CLI_PATH</code> or{' '}
+                    <code>ANTHROPIC_API_KEY</code> and try again.
+                  </p>
+                  {result.guardrail?.reasons?.length ? (
+                    <ul>
+                      {result.guardrail.reasons.map((reason, i) => (
+                        <li key={i}>{reason}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              )}
+
+              {!rejected && !agentUnavailable && (
+              <>
               <div className={styles.resultHeader}>
                 <h3>Analysis Results</h3>
                 <span className={styles.reportId}>{result.report_id}</span>
@@ -461,6 +496,8 @@ export default function Analyze() {
                     ))}
                   </ul>
                 </div>
+              )}
+              </>
               )}
             </div>
           )}

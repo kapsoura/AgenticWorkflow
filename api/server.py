@@ -69,10 +69,12 @@ def get_agents():
     global _agents
     if _agents is None:
         from src.agents.extraction import ExtractionAgent as AnthropicExtractionAgent
+        from src.agents.guardrail import GuardrailAgent
         from src.agents.risk_analysis import RiskAnalysisAgent
         _agents = {
             "extraction": AnthropicExtractionAgent(),
             "risk": RiskAnalysisAgent(),
+            "guardrail": GuardrailAgent(),
         }
     return _agents
 
@@ -172,6 +174,37 @@ def process_complaint(req: ComplaintRequest):
 
     pipeline = get_pipeline()
     steps = []
+
+    # Input guardrail (LLM): reject manipulation / non-complaints, or report the
+    # agent as unavailable when the LLM client is disabled — no heuristic.
+    _verdict = get_agents()["guardrail"].check_input(req.narrative)
+    if not _verdict.passed:
+        return {
+            "report_id": req.report_id,
+            "total_duration_ms": 0.0,
+            "rejected": True,
+            "guardrail_available": _verdict.available,
+            "steps": [
+                StepResult(
+                    step="input_guardrail",
+                    status="error",
+                    duration_ms=0,
+                    data={
+                        "rejected": _verdict.available,
+                        "available": _verdict.available,
+                        "reason": "input_guardrail_rejected"
+                        if _verdict.available
+                        else "guardrail_unavailable",
+                        "message": (
+                            "Narrative rejected by the LLM input guardrail; not processed."
+                            if _verdict.available
+                            else "Agent not available — the input guardrail (LLM) is not configured."
+                        ),
+                        "reasons": _verdict.reasons,
+                    },
+                ).model_dump()
+            ],
+        }
 
     # Step 1: Extraction (optional) — Anthropic agent only; Ollama is batch-only
     t0 = time.time()
@@ -340,6 +373,30 @@ def process_complaint_stream(req: ComplaintRequest):
     def gen():
         pipeline = get_pipeline()
         overall = time.time()
+
+        # Input guardrail (LLM): reject manipulation / non-complaints, or report
+        # the agent as unavailable when the LLM client is disabled.
+        _verdict = get_agents()["guardrail"].check_input(req.narrative)
+        if not _verdict.passed:
+            yield _sse("step", {
+                "step": "input_guardrail",
+                "status": "error",
+                "data": {
+                    "rejected": _verdict.available,
+                    "available": _verdict.available,
+                    "reason": "input_guardrail_rejected"
+                    if _verdict.available
+                    else "guardrail_unavailable",
+                    "message": (
+                        "Narrative rejected by the LLM input guardrail; not processed."
+                        if _verdict.available
+                        else "Agent not available — the input guardrail (LLM) is not configured."
+                    ),
+                    "reasons": _verdict.reasons,
+                },
+            })
+            yield _sse("done", {"rejected": True, "total_duration_ms": 0.0})
+            return
 
         # Step 1: Extraction
         yield _sse("step", {"step": "extraction", "status": "processing", "data": {}})
@@ -780,6 +837,68 @@ def analyze_complaint_endpoint(
     t0 = time.time()
     report_id = f"UI-{int(time.time())}"
 
+    # ── Input guardrail (LLM) ─────────────────────────────────────────────
+    # Classify the narrative with the LLM guardrail BEFORE any extraction or
+    # risk work. A rejection halts the pipeline entirely; if the guardrail
+    # agent itself is unavailable (LLM disabled) we surface "Agent not
+    # available" instead of falling back to a heuristic.
+    guardrail_agent = agents["guardrail"]
+    input_verdict = guardrail_agent.check_input(narrative)
+
+    if not input_verdict.available:
+        return {
+            "report_id": report_id,
+            "report_type": "UNAVAILABLE",
+            "applicable_report_types": [],
+            "risk_bucket": "UNAVAILABLE",
+            "risk": {
+                "bucket": "UNAVAILABLE",
+                "method": "unavailable",
+                "report_type": "UNAVAILABLE",
+                "signals": [],
+                "rationale": "Agent not available — the LLM guardrail could not run. Configure CLAUDE_CLI_PATH or ANTHROPIC_API_KEY.",
+            },
+            "extraction": {},
+            "extraction_status": {
+                "ok": False,
+                "reason": "guardrail_unavailable",
+                "message": "Agent not available — the input guardrail (LLM) is not configured.",
+            },
+            "evidence_count": 0,
+            "recalls": [],
+            "validation": {"passed": False, "issues": input_verdict.reasons},
+            "cluster": {},
+            "guardrail": {"available": False, "input_rejected": False, "reasons": input_verdict.reasons},
+            "total_duration_ms": round((time.time() - t0) * 1000, 1),
+        }
+
+    if not input_verdict.passed:
+        return {
+            "report_id": report_id,
+            "report_type": "REJECTED",
+            "applicable_report_types": [],
+            "risk_bucket": "REJECTED",
+            "risk": {
+                "bucket": "REJECTED",
+                "method": "guardrail",
+                "report_type": "REJECTED",
+                "signals": ["Input rejected by the LLM guardrail"],
+                "rationale": "Input rejected by the LLM input guardrail before any analysis. No report generated.",
+            },
+            "extraction": {},
+            "extraction_status": {
+                "ok": False,
+                "reason": "input_guardrail_rejected",
+                "message": "Complaint narrative was rejected by the LLM input guardrail and not analyzed.",
+            },
+            "evidence_count": 0,
+            "recalls": [],
+            "validation": {"passed": False, "issues": input_verdict.reasons},
+            "cluster": {},
+            "guardrail": {"available": True, "input_rejected": True, "reasons": input_verdict.reasons},
+            "total_duration_ms": round((time.time() - t0) * 1000, 1),
+        }
+
     complaint = Complaint(
         complaint_id=report_id,
         product_code=product_code,
@@ -813,9 +932,8 @@ def analyze_complaint_endpoint(
             "backend": getattr(extraction_agent, "last_backend", "unavailable"),
             "message": (
                 getattr(extraction_agent, "last_fallback_reason", None)
-                or "Anthropic LLM client not enabled (set CLAUDE_CLI_PATH or "
-                "ANTHROPIC_API_KEY in .env). Risk below uses the deterministic "
-                "ISO 14971 estimate from the risk-analysis agent."
+                or "Agent not available — the extraction agent requires the Anthropic "
+                "LLM (set CLAUDE_CLI_PATH or ANTHROPIC_API_KEY in .env)."
             ),
         }
 
@@ -884,9 +1002,9 @@ def analyze_complaint_endpoint(
         assessment = None
 
     report_type = "PSUR"
-    if assessment is not None:
+    if assessment is not None and assessment.llm_backed:
         report_type = assessment.report_type or report_type
-        method = "anthropic" if assessment.llm_backed else "deterministic"
+        method = "anthropic"
         risk_signals = [s for s in (
             f"Severity {assessment.severity_level} / probability {assessment.probability_level}",
             f"Hazardous situation: {assessment.hazardous_situation}" if assessment.hazardous_situation else "",
@@ -910,12 +1028,14 @@ def analyze_complaint_endpoint(
             "harm": assessment.harm,
         }
     else:
+        # LLM-only: no deterministic/heuristic fallback — surface unavailability.
         risk_block = {
-            "bucket": "UNKNOWN",
+            "bucket": "NOT_AVAILABLE",
             "method": "unavailable",
             "report_type": report_type,
             "signals": [],
-            "rationale": "Risk analysis could not be completed.",
+            "rationale": "Agent not available — the risk-analysis agent requires the "
+            "LLM (set CLAUDE_CLI_PATH or ANTHROPIC_API_KEY). No risk was inferred.",
         }
 
     # Which report types this complaint actually warrants, using the same routing

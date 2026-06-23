@@ -277,15 +277,6 @@ def _norm_bucket(value) -> str:
     return "ACCEPTABLE"
 
 
-def _matrix_bucket(severity: str, probability: str) -> str:
-    score = int(severity[1]) * int(probability[1])
-    if score >= 16:
-        return "UNACCEPTABLE"
-    if score >= 8:
-        return "ALARP"
-    return "ACCEPTABLE"
-
-
 def _report_type(event_type: str, risk_bucket: str) -> str:
     """Primary report type under the PSUR / INCIDENT_ASSESSMENT / CAPA taxonomy."""
     if event_type in {"death", "injury"} or risk_bucket == "UNACCEPTABLE":
@@ -356,62 +347,6 @@ def _two_pass_llm(context: str, llm: AnthropicClient) -> dict | None:
     return p2 if isinstance(p2, dict) and p2.get("severity_level") else p1
 
 
-def _deterministic_result(state: dict) -> dict:
-    """Offline ISO 14971 estimate when no LLM is available (heuristic, lower fidelity)."""
-    text = (state.get("complaint_text") or "").lower()
-    event_type = (state.get("event_type") or "").lower()
-
-    severity = "S2"
-    if "death" in text or event_type == "death":
-        severity = "S5"
-    elif "injury" in text or event_type == "injury":
-        severity = "S4"
-    elif "malfunction" in text or event_type == "malfunction":
-        severity = "S3"
-
-    recalls = state.get("matching_recalls") or []
-    events = state.get("matching_events") or []
-    hits = len(recalls)
-    probability = "P4" if hits >= 3 else "P3" if hits >= 1 else "P2"
-    risk = _matrix_bucket(severity, probability)
-
-    evidence_basis = [
-        {"source": "RECALL", "id": r.get("id"), "relevance": (r.get("snippet") or "")[:80]}
-        for r in recalls[:3]
-    ] + [
-        {"source": "MAUDE", "id": e.get("id"), "relevance": (e.get("snippet") or "")[:80]}
-        for e in events[:2]
-    ]
-
-    if risk == "UNACCEPTABLE":
-        capa_immediate = "Immediate containment, CAPA initiation, and PRRC notification within 24h."
-    elif risk == "ALARP":
-        capa_immediate = "Open CAPA with root-cause investigation and software patch validation plan."
-    else:
-        capa_immediate = "Track in trend log; monitor recurrence before CAPA escalation."
-
-    return {
-        "chain_of_thought": "Deterministic fallback (no LLM available).",
-        "hazardous_situation": f"{state.get('failure_mode') or 'Device failure'} in "
-        f"{state.get('modality') or 'device'} during clinical use.",
-        "harm": "Potential delayed/incorrect diagnosis or operator/patient exposure depending on failure mode.",
-        "severity_level": severity,
-        "severity_rationale": f"Derived from event type '{state.get('event_type')}' and complaint language.",
-        "probability_level": probability,
-        "probability_rationale": f"{hits} matching FDA recall(s) retrieved for this failure mode.",
-        "risk_level": risk,
-        "evidence_basis": evidence_basis,
-        "uncertainty": "Heuristic estimate without LLM reasoning; confirm severity/probability against full history.",
-        "capa_immediate": capa_immediate,
-        "capa_investigation": "Root-cause investigation per ISO 13485 §8.5.2.",
-        "capa_corrective": "",
-        "capa_preventive": "",
-        "capa_verification": "",
-        "capa_effectiveness": "",
-        "capa_precedent": (recalls[0].get("id") if recalls else None),
-    }
-
-
 # ── Standalone state-dict agent ─────────────────────────────────────────────────
 
 def risk_analysis_agent(state: dict) -> dict:
@@ -424,7 +359,7 @@ def risk_analysis_agent(state: dict) -> dict:
     past_reports = load_past_reports(failure_mode, modality)
 
     if not llm.enabled:
-        mode = "OFFLINE (deterministic ISO 14971)"
+        mode = "NOT AVAILABLE (LLM disabled)"
     elif llm._backend == "api":
         mode = "LIVE (Anthropic API)"
     else:
@@ -437,9 +372,35 @@ def risk_analysis_agent(state: dict) -> dict:
     context = _build_context(state, past_reports)
 
     result = _two_pass_llm(context, llm) if llm.enabled else None
-    llm_backed = result is not None
     if result is None:
-        result = _deterministic_result(state)
+        # LLM-only: no heuristic/deterministic fallback. Surface an explicit
+        # "agent not available" so the API can show it instead of inventing data.
+        print("  → RISK AGENT NOT AVAILABLE (LLM disabled or returned no usable assessment)")
+        return {
+            "hazardous_situation": "",
+            "harm": "",
+            "severity_level": "",
+            "severity_rationale": "",
+            "probability_level": "",
+            "probability_rationale": "",
+            "risk_level": "NOT_AVAILABLE",
+            "evidence_basis": [],
+            "uncertainty": "Agent not available — risk analysis requires the LLM "
+            "(set CLAUDE_CLI_PATH or ANTHROPIC_API_KEY).",
+            "capa_immediate": "",
+            "capa_investigation": "",
+            "capa_corrective": "",
+            "capa_preventive": "",
+            "capa_verification": "",
+            "capa_effectiveness": "",
+            "capa_precedent": None,
+            "escalation_required": False,
+            "prrc_notification_required": False,
+            "fsca_required": False,
+            "gate3_passed": False,
+            "_llm_backed": False,
+        }
+    llm_backed = True
 
     severity = _norm_level(result.get("severity_level"), "S", "S2")
     probability = _norm_level(result.get("probability_level"), "P", "P2")
@@ -548,6 +509,29 @@ class RiskAnalysisAgent:
 
     @staticmethod
     def _to_assessment(complaint, result: dict) -> RiskAssessment:
+        if not result.get("_llm_backed", False):
+            # LLM did not produce an assessment — no fabricated/heuristic values.
+            return RiskAssessment(
+                complaint_id=complaint.complaint_id,
+                severity_level="",
+                probability_level="",
+                risk_bucket="NOT_AVAILABLE",
+                escalation_required=False,
+                prrc_notification_required=False,
+                capa_recommendation="",
+                report_type="PSUR",
+                iso_14971_rationale=result.get("uncertainty")
+                or "Agent not available — risk analysis requires the LLM.",
+                hazardous_situation="",
+                harm="",
+                severity_rationale="",
+                probability_rationale="",
+                evidence_basis=[],
+                uncertainty=result.get("uncertainty") or "",
+                fsca_required=False,
+                llm_backed=False,
+            )
+
         risk = _norm_bucket(result.get("risk_level"))
         severity = _norm_level(result.get("severity_level"), "S", "S2")
         probability = _norm_level(result.get("probability_level"), "P", "P2")
