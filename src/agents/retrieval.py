@@ -59,7 +59,7 @@ class RetrievalAgent:
         top_k: int = 5,
         subqueries: Optional[List[str]] = None,
     ) -> List[RetrievalEvidence]:
-        issues = {issue.lower() for issue in extracted.key_issues}
+        issues = {issue.lower() for issue in extracted.key_issues if issue}
         scored: List[RetrievalEvidence] = []
 
         for event in events_by_code.get(complaint_product_code, []):
@@ -86,7 +86,7 @@ class RetrievalAgent:
             if recall.get("product_code") != complaint_product_code:
                 continue
             recall_text = f"{recall.get('reason_for_recall', '')} {recall.get('root_cause_description', '')}"
-            score = self._score_text(recall_text, issues) + 0.15
+            score = min(1.0, self._score_text(recall_text, issues) + 0.15)
             if score <= 0.15:
                 continue
             scored.append(
@@ -110,10 +110,15 @@ class RetrievalAgent:
                 if not sub.strip():
                     continue
                 try:
-                    result = vector_collection.query(query_embeddings=[embed_text(sub)], n_results=3)
+                    result = vector_collection.query(
+                        query_embeddings=[embed_text(sub)],
+                        n_results=3,
+                        include=["documents", "metadatas", "distances"],
+                    )
                     docs = result.get("documents", [[]])[0]
                     ids = result.get("ids", [[]])[0]
                     metas = result.get("metadatas", [[]])[0]
+                    distances = (result.get("distances") or [[]])[0]
                     for idx, doc in enumerate(docs):
                         vector_id = ids[idx]
                         if vector_id in seen_vector_ids:
@@ -121,13 +126,20 @@ class RetrievalAgent:
                         seen_vector_ids.add(vector_id)
                         meta = dict(metas[idx]) if idx < len(metas) else {}
                         meta["subquery"] = sub
+                        distance = distances[idx] if idx < len(distances) else None
+                        semantic = self._distance_to_similarity(distance)
+                        # Hybrid: ground the (weak) semantic neighbour with lexical
+                        # issue overlap so off-topic neighbours don't auto-pass.
+                        lexical = self._score_text(doc or "", issues)
+                        score = round(0.6 * semantic + 0.4 * lexical, 3)
+                        meta["semantic"] = round(semantic, 3)
                         scored.append(
                             RetrievalEvidence(
                                 evidence_id=f"VX-{vector_id}",
                                 source_type="VECTOR_EVENT",
                                 product_code=complaint_product_code,
                                 snippet=(doc or "")[:220],
-                                score=0.42,
+                                score=score,
                                 metadata=meta,
                             )
                         )
@@ -142,6 +154,7 @@ class RetrievalAgent:
             except Exception:
                 pass
 
+        scored = self._dedupe(scored)
         scored.sort(key=lambda x: x.score, reverse=True)
         return scored[:top_k]
 
@@ -153,11 +166,20 @@ class RetrievalAgent:
         limit = max(top_k, 5)
         live: List[RetrievalEvidence] = []
 
-        for event in self.openfda.search_adverse_events(
-            device_name=device_name, limit=limit
-        ):
+        # Prefer the precise product-code filter; fall back to the device-name
+        # phrase only when the code returns nothing (some OpenFDA endpoints do
+        # not annotate every record with a product code).
+        events = self.openfda.search_adverse_events(
+            product_code=complaint_product_code, limit=limit
+        )
+        if not events and device_name:
+            events = self.openfda.search_adverse_events(
+                device_name=device_name, limit=limit
+            )
+
+        for event in events:
             text = event.get("event_description") or ""
-            score = self._score_text(text, issues) + 0.1
+            score = min(1.0, self._score_text(text, issues) + 0.1)
             report_number = event.get("report_number", "unknown")
             device = event.get("device") or {}
             live.append(
@@ -177,16 +199,22 @@ class RetrievalAgent:
                 )
             )
 
-        for recall in self.openfda.search_recalls(
-            device_name=device_name, limit=limit
-        ):
+        recalls = self.openfda.search_recalls(
+            product_code=complaint_product_code, limit=limit
+        )
+        if not recalls and device_name:
+            recalls = self.openfda.search_recalls(
+                device_name=device_name, limit=limit
+            )
+
+        for recall in recalls:
             text = (
                 recall.get("reason_for_recall")
                 or recall.get("product_description")
                 or recall.get("event_description")
                 or ""
             )
-            score = self._score_text(text, issues) + 0.2
+            score = min(1.0, self._score_text(text, issues) + 0.2)
             recall_id = (
                 recall.get("recall_number")
                 or recall.get("res_event_number")
@@ -219,14 +247,61 @@ class RetrievalAgent:
         return best
 
     @staticmethod
+    def _distance_to_similarity(distance: Optional[float]) -> float:
+        """Map a vector distance to a 0..1 similarity.
+
+        Embeddings are L2-normalised, so the squared-L2 distance Chroma returns
+        lies in [0, 4] and relates to cosine similarity as ``cos = 1 - d/2``.
+        Missing distances fall back to a neutral 0.5.
+        """
+        if distance is None:
+            return 0.5
+        try:
+            sim = 1.0 - (float(distance) / 2.0)
+        except (TypeError, ValueError):
+            return 0.5
+        return max(0.0, min(1.0, sim))
+
+    @staticmethod
     def _score_text(text: str, issues: set) -> float:
-        text_l = text.lower()
-        if not issues:
+        """Lexical relevance of ``text`` to the extracted ``issues`` in [0, 1].
+
+        Each issue contributes a normalised hit: an exact substring scores 1.0,
+        otherwise a fuzzy ``token_set_ratio`` is used but only counted above a
+        floor so loosely-related noise does not inflate the score. The final
+        value blends coverage (mean across issues) with the single best hit.
+        """
+        if not text or not issues:
             return 0.0
-        exact_hits = sum(1 for issue in issues if issue and issue in text_l)
-        fuzzy_hits = 0.0
+        text_l = text.lower()
+        per_issue: List[float] = []
         for issue in issues:
+            issue = (issue or "").strip().lower()
             if not issue:
                 continue
-            fuzzy_hits += fuzz.partial_ratio(issue, text_l) / 100.0
-        return (exact_hits + fuzzy_hits) / max(len(issues) * 2, 1)
+            if issue in text_l:
+                per_issue.append(1.0)
+                continue
+            ratio = fuzz.token_set_ratio(issue, text_l) / 100.0
+            per_issue.append(ratio if ratio >= 0.6 else 0.0)
+        if not per_issue:
+            return 0.0
+        mean = sum(per_issue) / len(per_issue)
+        best = max(per_issue)
+        return round(0.5 * mean + 0.5 * best, 3)
+
+    @staticmethod
+    def _dedupe(items: List[RetrievalEvidence]) -> List[RetrievalEvidence]:
+        """Collapse the same underlying report across channels, keeping the
+        highest-scoring instance (e.g. ``EV-123``/``VX-123``/``LIVE-EV-123``).
+        """
+        best: Dict[tuple, RetrievalEvidence] = {}
+        for ev in items:
+            eid = ev.evidence_id
+            is_recall = "RC-" in eid
+            bare = eid.replace("LIVE-", "").split("-", 1)[-1]
+            key = (is_recall, bare)
+            current = best.get(key)
+            if current is None or ev.score > current.score:
+                best[key] = ev
+        return list(best.values())
