@@ -77,6 +77,31 @@ def get_agents():
     return _agents
 
 
+# Report-generation orchestrator (lazy init). Wires the same sub-agents the
+# LangGraph pipeline uses so downloaded reports are authored by the real
+# ReportGenerationAgent (LLM-backed, self-critiqued), not deterministic text.
+_orchestrator = None
+
+
+def get_orchestrator():
+    global _orchestrator
+    if _orchestrator is None:
+        from src.agents.archive_trend import ArchiveTrendAnalyzer
+        from src.agents.orchestration import OrchestrationAgent
+        from src.agents.report_generation import ReportGenerationAgent
+        from src.agents.retrieval import RetrievalAgent
+
+        agents = get_agents()
+        _orchestrator = OrchestrationAgent(
+            extraction_agent=agents["extraction"],
+            retrieval_agent=RetrievalAgent(),
+            risk_agent=agents["risk"],
+            report_agent=ReportGenerationAgent(),
+            trend_analyzer=ArchiveTrendAnalyzer(),
+        )
+    return _orchestrator
+
+
 def _interactive_extract(narrative: str, report_id: str, product_code: Optional[str] = None) -> dict:
     """Run interactive extraction through the Anthropic agent (never Ollama).
 
@@ -730,133 +755,6 @@ def _related_recalls(conn, product_code: Optional[str], limit: int = 5) -> list:
     return out
 
 
-def _build_report_sections(
-    complaint,
-    extraction_data: dict,
-    risk_block: dict,
-    cluster_data: dict,
-    recalls: list,
-) -> list:
-    """Assemble a deterministic, downloadable report from the structured analysis.
-
-    No LLM is required — every section is rendered from data already produced by
-    the extraction / risk / retrieval steps, so a report is always available to
-    download regardless of which risk backend was used.
-    """
-    def _fmt(value):
-        return value if value not in (None, "") else "—"
-
-    sections: list = []
-
-    sections.append({
-        "name": "executive_summary",
-        "title": "1. Executive Summary",
-        "content": (
-            f"Report type: {risk_block.get('report_type') or 'PSUR'}\n"
-            f"Product code: {complaint.product_code}\n"
-            f"Event type: {complaint.event_type}\n"
-            f"Manufacturer: {complaint.manufacturer}\n"
-            f"Overall risk (ISO 14971): {risk_block.get('bucket')}\n"
-            f"Assessment method: "
-            f"{'LLM (Anthropic)' if risk_block.get('method') == 'anthropic' else 'Deterministic ISO 14971'}"
-        ),
-    })
-
-    if (
-        extraction_data
-        and not extraction_data.get("error")
-        and extraction_data.get("qms_complaint_category") not in (None, "NOT_AVAILABLE")
-    ):
-        flags = extraction_data.get("safety_flags") or {}
-        sections.append({
-            "name": "signal_extraction",
-            "title": "2. Signal Extraction",
-            "content": (
-                f"QMS category: {_fmt(extraction_data.get('qms_complaint_category'))}\n"
-                f"Key issues: {', '.join(extraction_data.get('key_issues') or []) or '—'}\n"
-                f"Confidence: {extraction_data.get('confidence')}\n"
-                f"Safety flags: {', '.join(k for k, v in flags.items() if v) or 'none'}\n"
-                f"ISO 13485 clauses: {', '.join(extraction_data.get('iso_13485_clauses') or []) or '—'}\n"
-                f"ISO 14971 hazard tags: {', '.join(extraction_data.get('iso_14971_hazard_tags') or []) or '—'}"
-            ),
-        })
-    else:
-        sections.append({
-            "name": "signal_extraction",
-            "title": "2. Signal Extraction",
-            "content": "Structured extraction not available (LLM client not configured).",
-        })
-
-    sections.append({
-        "name": "risk_assessment",
-        "title": "3. Risk Assessment (ISO 14971)",
-        "content": (
-            f"Risk bucket: {risk_block.get('bucket')}\n"
-            f"Severity: {_fmt(risk_block.get('severity_level'))}\n"
-            f"Probability: {_fmt(risk_block.get('probability_level'))}\n"
-            f"Hazardous situation: {_fmt(risk_block.get('hazardous_situation'))}\n"
-            f"Harm: {_fmt(risk_block.get('harm'))}\n"
-            f"Escalation required: {risk_block.get('escalation_required', False)}\n"
-            f"PRRC notification: {risk_block.get('prrc_notification_required', False)}\n\n"
-            f"Rationale:\n{risk_block.get('rationale') or '—'}"
-        ),
-    })
-
-    if risk_block.get("capa_recommendation"):
-        sections.append({
-            "name": "capa",
-            "title": "4. CAPA Recommendation",
-            "content": str(risk_block.get("capa_recommendation")),
-        })
-
-    similar = cluster_data.get("similar_events") or []
-    if similar:
-        lines = []
-        for ev in similar:
-            score = ev.get("similarity_score")
-            pct = f"{score * 100:.1f}%" if isinstance(score, (int, float)) else "—"
-            meta = " · ".join(
-                str(x) for x in [ev.get("manufacturer"), ev.get("product_code"), ev.get("date_received")] if x
-            )
-            lines.append(
-                f"- {ev.get('report_number')} ({pct} match) {meta}\n  {ev.get('narrative_snippet') or ''}".rstrip()
-            )
-        sections.append({
-            "name": "retrieval_evidence",
-            "title": "5. Retrieved Similar Events",
-            "content": "\n".join(lines),
-        })
-
-    if recalls:
-        lines = []
-        for rc in recalls:
-            lines.append(
-                f"- {rc.get('recall_number')} [{rc.get('classification') or '—'}] "
-                f"{rc.get('recalling_firm') or ''} {rc.get('recall_date') or ''}\n"
-                f"  {rc.get('reason_for_recall') or ''}".rstrip()
-            )
-        sections.append({
-            "name": "fda_recalls",
-            "title": "6. Related FDA Recalls (openFDA)",
-            "content": "\n".join(lines),
-        })
-
-    if cluster_data and not cluster_data.get("error"):
-        sections.append({
-            "name": "cluster_assignment",
-            "title": "7. Cluster Assignment",
-            "content": (
-                f"Cluster ID: {_fmt(cluster_data.get('cluster_id'))}\n"
-                f"Cluster label: {_fmt(cluster_data.get('cluster_label'))}\n"
-                f"Trend flag: {_fmt(cluster_data.get('trend_flag'))}\n"
-                f"Cluster size: {_fmt(cluster_data.get('cluster_size'))}\n"
-                f"30-day growth rate: {_fmt(cluster_data.get('growth_rate_30d'))}"
-            ),
-        })
-
-    return sections
-
-
 @app.post("/api/analyze")
 def analyze_complaint_endpoint(
     narrative: str,
@@ -1020,10 +918,6 @@ def analyze_complaint_endpoint(
             "rationale": "Risk analysis could not be completed.",
         }
 
-    sections = _build_report_sections(
-        complaint, extraction_data, risk_block, cluster_data, recalls
-    )
-
     total_ms = round((time.time() - t0) * 1000, 1)
 
     return {
@@ -1035,7 +929,6 @@ def analyze_complaint_endpoint(
         "extraction_status": extraction_status,
         "evidence_count": len(cluster_data.get("similar_events", [])),
         "recalls": recalls,
-        "sections": sections,
         "validation": {"passed": True, "issues": []},
         "cluster": cluster_data,
         "total_duration_ms": total_ms,
@@ -1052,7 +945,6 @@ class ReportExportRequest(BaseModel):
     risk: Optional[dict] = None
     extraction: Optional[dict] = None
     recalls: Optional[list] = None
-    sections: Optional[list] = None
     cluster: Optional[dict] = None
     narrative: Optional[str] = None
     product_code: Optional[str] = None
@@ -1060,94 +952,172 @@ class ReportExportRequest(BaseModel):
     manufacturer: Optional[str] = None
 
 
-def _build_report_docx(payload: "ReportExportRequest") -> bytes:
-    """Render an analysis payload to a Word (.docx) document in memory."""
+def _reconstruct_domain(payload: "ReportExportRequest"):
+    """Rebuild the workflow domain objects from a /api/analyze response payload.
+
+    These feed the real ReportGenerationAgent so the downloaded reports are
+    agent-authored. Risk fields not carried in the API response default safely.
+    """
+    from src.pipeline.schemas import (
+        Complaint,
+        ExtractedSignal,
+        RetrievalEvidence,
+        RiskAssessment,
+    )
+
+    rid = payload.report_id or "ANALYSIS"
+    complaint = Complaint(
+        complaint_id=rid,
+        product_code=payload.product_code or "",
+        manufacturer=payload.manufacturer or "Unknown",
+        event_type=payload.event_type or "",
+        date_received="",
+        narrative=payload.narrative or "",
+        source_report_number=rid,
+    )
+
+    ex = payload.extraction or {}
+    extraction = ExtractedSignal(
+        complaint_id=rid,
+        qms_complaint_category=ex.get("qms_complaint_category") or "NOT_AVAILABLE",
+        key_issues=ex.get("key_issues") or [],
+        confidence=float(ex.get("confidence") or 0.0),
+        safety_flags=ex.get("safety_flags") or {},
+        iso_13485_clauses=ex.get("iso_13485_clauses") or [],
+        iso_14971_hazard_tags=ex.get("iso_14971_hazard_tags") or [],
+    )
+
+    rk = payload.risk or {}
+    risk = RiskAssessment(
+        complaint_id=rid,
+        severity_level=rk.get("severity_level") or "",
+        probability_level=rk.get("probability_level") or "",
+        risk_bucket=rk.get("bucket") or payload.risk_bucket or "UNKNOWN",
+        escalation_required=bool(rk.get("escalation_required")),
+        prrc_notification_required=bool(rk.get("prrc_notification_required")),
+        capa_recommendation=rk.get("capa_recommendation") or "",
+        report_type=rk.get("report_type") or payload.report_type or "PSUR",
+        iso_14971_rationale=rk.get("rationale") or "",
+        hazardous_situation=rk.get("hazardous_situation") or "",
+        harm=rk.get("harm") or "",
+        fsca_required=bool(rk.get("fsca_required")),
+        llm_backed=True,
+    )
+
+    cluster = payload.cluster or {}
+    evidence = []
+    for ev in cluster.get("similar_events") or []:
+        evidence.append(RetrievalEvidence(
+            evidence_id=str(ev.get("report_number") or "event"),
+            source_type="MAUDE_EVENT",
+            product_code=ev.get("product_code") or complaint.product_code,
+            snippet=ev.get("narrative_snippet") or "",
+            score=float(ev.get("similarity_score") or 0.0),
+            metadata={
+                "manufacturer": ev.get("manufacturer"),
+                "device_name": ev.get("device_name"),
+                "date_received": ev.get("date_received"),
+            },
+        ))
+    for rc in payload.recalls or []:
+        evidence.append(RetrievalEvidence(
+            evidence_id=str(rc.get("recall_number") or "recall"),
+            source_type="FDA_RECALL",
+            product_code=complaint.product_code,
+            snippet=rc.get("reason_for_recall") or "",
+            score=1.0,
+            metadata={
+                "classification": rc.get("classification"),
+                "root_cause": rc.get("root_cause"),
+                "recalling_firm": rc.get("recalling_firm"),
+                "recall_date": rc.get("recall_date"),
+            },
+        ))
+
+    return complaint, extraction, risk, evidence
+
+
+def _generate_agent_reports(payload: "ReportExportRequest", report_types: list) -> list:
+    """Author each report type with the real ReportGenerationAgent.
+
+    Returns a list of ``(report_type, report_id, markdown)``. Narrative prose
+    needs the LLM backend; deterministic facts still render when it is absent.
+    """
+    from src.agents.report_sections import ReportContext
+
+    complaint, extraction, risk, evidence = _reconstruct_domain(payload)
+
+    # Same archive events the LangGraph pipeline feeds the trend/quality agents.
+    try:
+        from src.config import IMAGING_EVENTS_DIR
+        from src.utils.data_loader import load_events_for_codes
+        events_by_code = load_events_for_codes(
+            IMAGING_EVENTS_DIR, [complaint.product_code], 300
+        )
+    except Exception:  # noqa: BLE001 — degrade to no archive context
+        events_by_code = {complaint.product_code: []}
+
+    orchestrator = get_orchestrator()
+    out = []
+    for rt in report_types:
+        context = ReportContext(
+            complaint=complaint,
+            extraction=extraction,
+            retrieval=list(evidence),
+            risk=risk,
+            report_type=rt,
+            events_by_code=events_by_code,
+        )
+        report = orchestrator.report_agent.create_report(
+            trace_id=complaint.complaint_id,
+            context=context,
+            orchestrator=orchestrator,
+        )
+        out.append((rt, report.report_id, report.report_markdown))
+    return out
+
+
+def _markdown_to_docx(report_type: str, report_id: str, markdown: str) -> bytes:
+    """Render an agent-authored Markdown report to a Word (.docx) document."""
     import io
 
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Pt, RGBColor
 
-    risk = payload.risk or {}
-    cluster = payload.cluster or {}
-    similar = cluster.get("similar_events") or []
-    recalls = payload.recalls or []
+    type_titles = {
+        "PSUR": "Periodic Safety Update Report (PSUR)",
+        "INCIDENT_ASSESSMENT": "Incident Assessment Report",
+        "CAPA": "CAPA Report",
+    }
 
     doc = Document()
     normal = doc.styles["Normal"]
     normal.font.name = "Calibri"
     normal.font.size = Pt(10.5)
 
-    # Title
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("Signal Intelligence Report")
+    run = title.add_run(type_titles.get(report_type, "Signal Intelligence Report"))
     run.bold = True
     run.font.size = Pt(20)
     run.font.color.rgb = RGBColor(0x1F, 0x3A, 0x5F)
 
-    meta = doc.add_paragraph()
-    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    meta_run = meta.add_run(
-        f"Report ID: {payload.report_id or '—'}   |   "
-        f"Report type: {payload.report_type or '—'}   |   "
-        f"Risk: {payload.risk_bucket or '—'}"
-    )
-    meta_run.font.size = Pt(10)
-    meta_run.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
-    doc.add_paragraph()
-
-    # Complaint
-    doc.add_heading("Complaint", level=1)
-    info = doc.add_paragraph()
-    info.add_run("Product code: ").bold = True
-    info.add_run(f"{payload.product_code or '—'}\n")
-    info.add_run("Event type: ").bold = True
-    info.add_run(f"{payload.event_type or '—'}\n")
-    info.add_run("Manufacturer: ").bold = True
-    info.add_run(f"{payload.manufacturer or 'Unknown'}")
-    if payload.narrative:
-        nar = doc.add_paragraph(payload.narrative)
-        nar.style = doc.styles["Quote"] if "Quote" in [s.name for s in doc.styles] else nar.style
-
-    # Prefer the structured sections produced by the backend; they already
-    # cover risk, CAPA, evidence, recalls and cluster in a deterministic order.
-    if payload.sections:
-        for sec in payload.sections:
-            doc.add_heading(sec.get("title") or sec.get("name") or "Section", level=1)
-            for line in str(sec.get("content") or "").split("\n"):
-                doc.add_paragraph(line)
-    else:
-        # Fallback rendering when sections are absent.
-        doc.add_heading("Risk Assessment (ISO 14971)", level=1)
-        rp = doc.add_paragraph()
-        rp.add_run("Risk bucket: ").bold = True
-        rp.add_run(f"{risk.get('bucket') or payload.risk_bucket or '—'}\n")
-        rp.add_run("Method: ").bold = True
-        rp.add_run(f"{risk.get('method') or '—'}\n")
-        rp.add_run("Rationale: ").bold = True
-        rp.add_run(f"{risk.get('rationale') or '—'}")
-        for sig in risk.get("signals") or []:
-            doc.add_paragraph(sig, style="List Bullet")
-
-        if similar:
-            doc.add_heading("Retrieved Similar Events", level=1)
-            for ev in similar:
-                score = ev.get("similarity_score")
-                pct = f"{score * 100:.1f}%" if isinstance(score, (int, float)) else "—"
-                doc.add_paragraph(
-                    f"{ev.get('report_number')} ({pct} match) — {ev.get('narrative_snippet') or ''}",
-                    style="List Bullet",
-                )
-
-        if recalls:
-            doc.add_heading("Related FDA Recalls", level=1)
-            for rc in recalls:
-                doc.add_paragraph(
-                    f"{rc.get('recall_number')} [{rc.get('classification') or '—'}] — "
-                    f"{rc.get('reason_for_recall') or ''}",
-                    style="List Bullet",
-                )
+    for raw in (markdown or "").split("\n"):
+        line = raw.rstrip()
+        stripped = line.lstrip("#").strip()
+        if line.startswith("### "):
+            doc.add_heading(stripped, level=3)
+        elif line.startswith("## "):
+            doc.add_heading(stripped, level=2)
+        elif line.startswith("# "):
+            doc.add_heading(stripped, level=1)
+        elif line.startswith(("- ", "* ")):
+            doc.add_paragraph(line[2:].strip(), style="List Bullet")
+        elif not line:
+            doc.add_paragraph("")
+        else:
+            doc.add_paragraph(line)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -1155,19 +1125,56 @@ def _build_report_docx(payload: "ReportExportRequest") -> bytes:
 
 
 @app.post("/api/analyze/report")
-def export_report_docx(payload: ReportExportRequest):
-    """Return the analysis payload rendered as a downloadable Word document."""
+def export_report_docx(payload: ReportExportRequest, report_type: Optional[str] = None):
+    """Return a single agent-authored report rendered as a Word document.
+
+    ``report_type`` (PSUR / INCIDENT_ASSESSMENT / CAPA) selects which report the
+    ReportGenerationAgent authors; defaults to the analysis's routed type.
+    """
+    rt = report_type or payload.report_type or "PSUR"
     try:
-        data = _build_report_docx(payload)
+        generated = _generate_agent_reports(payload, [rt])
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
 
-    filename = f"{payload.report_id or 'analysis'}.docx"
+    _rt, report_id, markdown = generated[0]
+    data = _markdown_to_docx(_rt, report_id, markdown)
+    filename = f"{payload.report_id or 'analysis'}_{_rt}.docx"
     return StreamingResponse(
         iter([data]),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.post("/api/analyze/reports")
+def export_reports_zip(payload: ReportExportRequest):
+    """Author PSUR, Incident Assessment and CAPA as three separate Word reports.
+
+    Each is produced by the real ReportGenerationAgent and packaged in one
+    ``.zip`` so a single click yields all three distinct reports.
+    """
+    import io
+    import zipfile
+
+    report_types = ["PSUR", "INCIDENT_ASSESSMENT", "CAPA"]
+    base = payload.report_id or "analysis"
+    try:
+        generated = _generate_agent_reports(payload, report_types)
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for rt, report_id, markdown in generated:
+                zf.writestr(f"{base}_{rt}.docx", _markdown_to_docx(rt, report_id, markdown))
+        data = zip_buffer.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
+
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{base}_reports.zip"'},
+    )
+
 
 
 if __name__ == "__main__":

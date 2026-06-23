@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Send, AlertTriangle, CheckCircle, FileText, Download } from 'lucide-react';
-import { analyzeComplaint, downloadReportDocx, fetchMeta } from '../api/client';
+import { analyzeComplaint, downloadReportsZip, fetchMeta } from '../api/client';
 import type { AnalyzeResponse } from '../api/client';
 import { useAnalysis } from '../context/AnalysisContext';
 import { buildReportMarkdown } from '../utils/report';
@@ -87,8 +87,9 @@ export default function Analyze() {
       URL.revokeObjectURL(url);
     };
     try {
-      const docx = await downloadReportDocx(result, inputsPayload);
-      triggerDownload(docx, 'docx');
+      // Three separate reports (PSUR, Incident Assessment, CAPA) in one .zip.
+      const zip = await downloadReportsZip(result, inputsPayload);
+      triggerDownload(zip, 'zip');
     } catch {
       // Fall back to a client-side Markdown report if the backend is offline.
       const markdown = buildReportMarkdown(result, inputs);
@@ -224,7 +225,7 @@ export default function Analyze() {
                 <span className={styles.reportId}>{result.report_id}</span>
                 <button className={styles.downloadBtn} onClick={handleDownload}>
                   <Download size={14} />
-                  Download DOCX
+                  Download Reports (ZIP)
                 </button>
               </div>
 
@@ -344,18 +345,6 @@ export default function Analyze() {
                         <p className={styles.evidenceText}>{rc.reason_for_recall}</p>
                       )}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {result.sections && result.sections.length > 0 && (
-                <div className={styles.sections}>
-                  <h4>Report Sections</h4>
-                  {result.sections.map((sec, i) => (
-                    <details key={i} className={styles.details}>
-                      <summary>{sec.title || sec.name}</summary>
-                      <div className={styles.sectionContent}>{sec.content}</div>
-                    </details>
                   ))}
                 </div>
               )}

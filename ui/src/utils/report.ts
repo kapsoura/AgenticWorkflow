@@ -106,16 +106,5 @@ export function buildReportMarkdown(
     lines.push('');
   }
 
-  if (result.sections && result.sections.length > 0) {
-    lines.push(`## Report Sections`);
-    lines.push('');
-    result.sections.forEach((sec) => {
-      lines.push(`### ${sec.title || sec.name}`);
-      lines.push('');
-      lines.push(sec.content);
-      lines.push('');
-    });
-  }
-
   return lines.join('\n');
 }

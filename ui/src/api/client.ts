@@ -82,7 +82,6 @@ export interface AnalyzeResponse {
   extraction_status?: { ok: boolean; reason?: string; message?: string };
   evidence_count: number;
   recalls?: RecallEvidence[];
-  sections: { name: string; title: string; content: string }[];
   validation: { passed: boolean; issues: string[] };
   cluster?: Record<string, unknown> & {
     similar_events?: SimilarEvent[];
@@ -172,6 +171,26 @@ export async function downloadReportDocx(
   inputs: { narrative: string; product_code: string; event_type: string; manufacturer: string }
 ): Promise<Blob> {
   const res = await fetch(`${BASE_URL}/api/analyze/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...result, ...inputs }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.blob();
+}
+
+/**
+ * Generate the three separate reports (PSUR, Incident Assessment, CAPA) on the
+ * backend and return them packaged as a single .zip blob for download.
+ */
+export async function downloadReportsZip(
+  result: AnalyzeResponse,
+  inputs: { narrative: string; product_code: string; event_type: string; manufacturer: string }
+): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/api/analyze/reports`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...result, ...inputs }),

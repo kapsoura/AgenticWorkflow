@@ -96,7 +96,8 @@ export default function Reports() {
         <Download size={16} />
         <span>
           To download a generated report, use the <strong>Analyze</strong> page
-          and click <strong>Download DOCX</strong> to save a Word report.
+          and click <strong>Download Reports (ZIP)</strong> to save the three
+          separate Word reports (PSUR, Incident Assessment, CAPA).
         </span>
       </div>
     </div>
