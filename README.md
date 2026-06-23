@@ -201,19 +201,61 @@ before sign-off. This is the evaluator-optimizer loop working as designed.
 
 ---
 
-### Full pipeline via FastAPI (all 4 agents, web UI)
+### Full app — web UI (React + Vite) + FastAPI backend
+
+The app is split into a **FastAPI backend** (`api/server.py`) and a **React + Vite
+frontend** (`ui/`). The frontend dev server proxies `/api` and `/health` to the
+backend on port 8000 (see `ui/vite.config.ts`).
+
+**1. Start the backend** (terminal 1, from the repo root):
 
 ```bash
-uvicorn src.api:app --reload --host 127.0.0.1 --port 8000
+# Windows (PowerShell, project venv):
+.\.venv-1\Scripts\python.exe -m uvicorn api.server:app --reload --host 127.0.0.1 --port 8000
+
+# macOS/Linux:
+uvicorn api.server:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Then open `http://127.0.0.1:8000` in a browser, or POST a complaint:
+> The pipeline backend calls a local **Ollama** server (`mistral-small` at
+> `http://localhost:11434`) for extraction. `/health`, `/api/stats` and
+> `/api/trends` work without it; `/api/process` (complaint analysis) needs Ollama running.
+> To enable **live OpenFDA** evidence, set `OPENFDA_LIVE_RETRIEVAL=1` before starting
+> the backend (`$env:OPENFDA_LIVE_RETRIEVAL = "1"` on PowerShell).
+
+**2. Start the frontend** (terminal 2):
 
 ```bash
-curl -X POST http://127.0.0.1:8000/analyze \
+cd ui
+npm install      # first run only
+npm run dev
+```
+
+Then open **http://localhost:5173** in a browser.
+
+**Backend API endpoints** (base `http://127.0.0.1:8000`):
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET`  | `/health` | Liveness check |
+| `GET`  | `/api/meta` | Build/metadata info |
+| `GET`  | `/api/stats` | FDA archive statistics |
+| `GET`  | `/api/trends` | Trend/cluster summaries |
+| `GET`  | `/api/clusters` | Pre-built HDBSCAN clusters |
+| `GET`  | `/api/templates` | Report templates |
+| `POST` | `/api/process` | Run the full pipeline on a complaint |
+| `POST` | `/api/analyze` | Analyze a complaint |
+
+Example — process a complaint directly via the API:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/process \
   -H "Content-Type: application/json" \
-  -d '{"narrative": "MRI system showed banding artifacts during cardiac sequence", "product_code": "LNH"}'
+  -d '{"narrative": "MRI system showed banding artifacts during cardiac sequence", "report_id": "UI-001"}'
 ```
+
+> **Production note:** the container image (`Dockerfile`) serves the backend with
+> `uvicorn api.server:app`; the built frontend is deployed separately (GitHub Pages).
 
 ### Agent 1 only — Extraction + Trend Analysis
 
