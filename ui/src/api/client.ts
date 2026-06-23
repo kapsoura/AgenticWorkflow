@@ -142,3 +142,93 @@ export async function fetchClusters(): Promise<Record<string, unknown>[]> {
   const res = await fetch(`${BASE_URL}/api/clusters`);
   return handleResponse<Record<string, unknown>[]>(res);
 }
+
+export interface GraphNode {
+  id: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  conditional: boolean;
+}
+
+export interface GraphResponse {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export async function fetchGraph(): Promise<GraphResponse> {
+  const res = await fetch(`${BASE_URL}/api/graph`);
+  return handleResponse<GraphResponse>(res);
+}
+
+export interface StepEvent {
+  step: string;
+  status: 'processing' | 'success' | 'error' | 'skipped';
+  duration_ms?: number;
+  data: Record<string, unknown>;
+}
+
+export type StreamHandler = (event: string, data: Record<string, unknown>) => void;
+
+/**
+ * Stream the processing pipeline via Server-Sent Events so the UI can render
+ * the agentic flow live, node-by-node. Parses the SSE frames from the fetch
+ * body stream (EventSource only supports GET, so we read the stream manually).
+ */
+export async function streamProcess(
+  data: {
+    narrative: string;
+    report_id?: string;
+    skip_extraction?: boolean;
+    product_code?: string;
+  },
+  onEvent: StreamHandler,
+  signal?: AbortSignal
+): Promise<void> {
+  const res = await fetch(`${BASE_URL}/api/process/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      narrative: data.narrative,
+      report_id: data.report_id || `UI-${Date.now()}`,
+      skip_extraction: data.skip_extraction ?? true,
+      product_code: data.product_code ?? null,
+    }),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    const text = res.body ? await res.text() : '';
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+    for (const frame of frames) {
+      if (!frame.trim()) continue;
+      let eventName = 'message';
+      const dataLines: string[] = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) eventName = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      }
+      if (dataLines.length) {
+        try {
+          onEvent(eventName, JSON.parse(dataLines.join('\n')));
+        } catch {
+          /* ignore malformed frame */
+        }
+      }
+    }
+  }
+}

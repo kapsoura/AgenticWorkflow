@@ -222,3 +222,148 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.infoCard {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+}
+
+.infoCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+  color: #4f46e5;
+}
+
+.infoCardHeader h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.flag {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+
+.flagBad {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.12);
+}
+
+.flagWarn {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.12);
+}
+
+.flagNeutral {
+  color: var(--muted);
+  background: var(--panel);
+}
+
+.metaRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.8rem;
+}
+
+.metaRow > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.metaLabel {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metaRow strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.similarList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.similarItem {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  background: var(--panel);
+}
+
+.similarTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.similarId {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.similarScore {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #4f46e5;
+}
+
+.similarText {
+  font-size: 0.76rem;
+  color: var(--muted);
+  margin-top: 0.3rem;
+  line-height: 1.4;
+}
+
+.downloadBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.downloadBtn:hover {
+  border-color: #4f46e5;
+  color: #4f46e5;
+}
+
+.details {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  background: var(--panel-2);
+}
+
+.details summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}

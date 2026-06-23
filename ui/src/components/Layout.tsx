@@ -7,6 +7,7 @@ import {
   Play,
   Activity,
   Shield,
+  Workflow as WorkflowIcon,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth } from '../api/client';
@@ -17,7 +18,8 @@ const NAV_ITEMS = [
   { to: '/analyze', icon: FileSearch, label: 'Complaint Analysis' },
   { to: '/trends', icon: TrendingUp, label: 'Signal Trends' },
   { to: '/reports', icon: FileText, label: 'Report Templates' },
-  { to: '/workflow', icon: Play, label: 'Pipeline' },
+  { to: '/workflow', icon: Play, label: 'Live Pipeline' },
+  { to: '/langgraph', icon: WorkflowIcon, label: 'LangGraph Flow' },
 ];
 
 export default function Layout() {

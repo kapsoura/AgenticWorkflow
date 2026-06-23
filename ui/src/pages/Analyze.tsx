@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Send, AlertTriangle, CheckCircle, FileText } from 'lucide-react';
+import { Send, AlertTriangle, CheckCircle, FileText, Download } from 'lucide-react';
 import { analyzeComplaint, fetchMeta } from '../api/client';
 import type { AnalyzeResponse } from '../api/client';
 import Spinner from '../components/Spinner';
@@ -67,6 +67,19 @@ export default function Analyze() {
     setEventType(s.event_type);
     setManufacturer(s.manufacturer);
     setResult(null);
+  };
+
+  const handleDownload = () => {
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${result.report_id || 'analysis'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -195,6 +208,10 @@ export default function Analyze() {
               <div className={styles.resultHeader}>
                 <h3>Analysis Results</h3>
                 <span className={styles.reportId}>{result.report_id}</span>
+                <button className={styles.downloadBtn} onClick={handleDownload}>
+                  <Download size={14} />
+                  Download
+                </button>
               </div>
 
               <div className={styles.badges}>
