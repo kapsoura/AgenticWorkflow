@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Send, AlertTriangle, CheckCircle, FileText, Download } from 'lucide-react';
-import { analyzeComplaint, fetchMeta } from '../api/client';
+import { analyzeComplaint, downloadReportDocx, fetchMeta } from '../api/client';
 import type { AnalyzeResponse } from '../api/client';
 import { useAnalysis } from '../context/AnalysisContext';
 import { buildReportMarkdown } from '../utils/report';
@@ -69,16 +69,31 @@ export default function Analyze() {
     setResult(null);
   };
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (!result) return;
-    const markdown = buildReportMarkdown(result, inputs);
-    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${result.report_id || 'analysis'}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const baseName = result.report_id || 'analysis';
+    const inputsPayload = {
+      narrative,
+      product_code: productCode,
+      event_type: eventType,
+      manufacturer: manufacturer || 'Unknown',
+    };
+    const triggerDownload = (blob: Blob, ext: string) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+    try {
+      const docx = await downloadReportDocx(result, inputsPayload);
+      triggerDownload(docx, 'docx');
+    } catch {
+      // Fall back to a client-side Markdown report if the backend is offline.
+      const markdown = buildReportMarkdown(result, inputs);
+      triggerDownload(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), 'md');
+    }
   };
 
   return (
@@ -209,7 +224,7 @@ export default function Analyze() {
                 <span className={styles.reportId}>{result.report_id}</span>
                 <button className={styles.downloadBtn} onClick={handleDownload}>
                   <Download size={14} />
-                  Download
+                  Download DOCX
                 </button>
               </div>
 

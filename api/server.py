@@ -1042,7 +1042,136 @@ def analyze_complaint_endpoint(
     }
 
 
+# ─── DOCX report export ──────────────────────────────────────────────────────
+
+class ReportExportRequest(BaseModel):
+    """Analysis payload (the /api/analyze response) to render as a Word report."""
+    report_id: Optional[str] = None
+    report_type: Optional[str] = None
+    risk_bucket: Optional[str] = None
+    risk: Optional[dict] = None
+    extraction: Optional[dict] = None
+    recalls: Optional[list] = None
+    sections: Optional[list] = None
+    cluster: Optional[dict] = None
+    narrative: Optional[str] = None
+    product_code: Optional[str] = None
+    event_type: Optional[str] = None
+    manufacturer: Optional[str] = None
+
+
+def _build_report_docx(payload: "ReportExportRequest") -> bytes:
+    """Render an analysis payload to a Word (.docx) document in memory."""
+    import io
+
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
+
+    risk = payload.risk or {}
+    cluster = payload.cluster or {}
+    similar = cluster.get("similar_events") or []
+    recalls = payload.recalls or []
+
+    doc = Document()
+    normal = doc.styles["Normal"]
+    normal.font.name = "Calibri"
+    normal.font.size = Pt(10.5)
+
+    # Title
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title.add_run("Signal Intelligence Report")
+    run.bold = True
+    run.font.size = Pt(20)
+    run.font.color.rgb = RGBColor(0x1F, 0x3A, 0x5F)
+
+    meta = doc.add_paragraph()
+    meta.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    meta_run = meta.add_run(
+        f"Report ID: {payload.report_id or '—'}   |   "
+        f"Report type: {payload.report_type or '—'}   |   "
+        f"Risk: {payload.risk_bucket or '—'}"
+    )
+    meta_run.font.size = Pt(10)
+    meta_run.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
+    doc.add_paragraph()
+
+    # Complaint
+    doc.add_heading("Complaint", level=1)
+    info = doc.add_paragraph()
+    info.add_run("Product code: ").bold = True
+    info.add_run(f"{payload.product_code or '—'}\n")
+    info.add_run("Event type: ").bold = True
+    info.add_run(f"{payload.event_type or '—'}\n")
+    info.add_run("Manufacturer: ").bold = True
+    info.add_run(f"{payload.manufacturer or 'Unknown'}")
+    if payload.narrative:
+        nar = doc.add_paragraph(payload.narrative)
+        nar.style = doc.styles["Quote"] if "Quote" in [s.name for s in doc.styles] else nar.style
+
+    # Prefer the structured sections produced by the backend; they already
+    # cover risk, CAPA, evidence, recalls and cluster in a deterministic order.
+    if payload.sections:
+        for sec in payload.sections:
+            doc.add_heading(sec.get("title") or sec.get("name") or "Section", level=1)
+            for line in str(sec.get("content") or "").split("\n"):
+                doc.add_paragraph(line)
+    else:
+        # Fallback rendering when sections are absent.
+        doc.add_heading("Risk Assessment (ISO 14971)", level=1)
+        rp = doc.add_paragraph()
+        rp.add_run("Risk bucket: ").bold = True
+        rp.add_run(f"{risk.get('bucket') or payload.risk_bucket or '—'}\n")
+        rp.add_run("Method: ").bold = True
+        rp.add_run(f"{risk.get('method') or '—'}\n")
+        rp.add_run("Rationale: ").bold = True
+        rp.add_run(f"{risk.get('rationale') or '—'}")
+        for sig in risk.get("signals") or []:
+            doc.add_paragraph(sig, style="List Bullet")
+
+        if similar:
+            doc.add_heading("Retrieved Similar Events", level=1)
+            for ev in similar:
+                score = ev.get("similarity_score")
+                pct = f"{score * 100:.1f}%" if isinstance(score, (int, float)) else "—"
+                doc.add_paragraph(
+                    f"{ev.get('report_number')} ({pct} match) — {ev.get('narrative_snippet') or ''}",
+                    style="List Bullet",
+                )
+
+        if recalls:
+            doc.add_heading("Related FDA Recalls", level=1)
+            for rc in recalls:
+                doc.add_paragraph(
+                    f"{rc.get('recall_number')} [{rc.get('classification') or '—'}] — "
+                    f"{rc.get('reason_for_recall') or ''}",
+                    style="List Bullet",
+                )
+
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    return buffer.getvalue()
+
+
+@app.post("/api/analyze/report")
+def export_report_docx(payload: ReportExportRequest):
+    """Return the analysis payload rendered as a downloadable Word document."""
+    try:
+        data = _build_report_docx(payload)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {exc}")
+
+    filename = f"{payload.report_id or 'analysis'}.docx"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 if __name__ == "__main__":
     import os
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+

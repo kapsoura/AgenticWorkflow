@@ -96,7 +96,7 @@ export default function Reports() {
         <Download size={16} />
         <span>
           To download a generated report, use the <strong>Analyze</strong> page
-          and click <strong>Download</strong> to save a Markdown report.
+          and click <strong>Download DOCX</strong> to save a Word report.
         </span>
       </div>
     </div>

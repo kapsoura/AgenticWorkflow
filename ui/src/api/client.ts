@@ -163,6 +163,26 @@ export async function analyzeComplaint(data: {
   return handleResponse<AnalyzeResponse>(res);
 }
 
+/**
+ * Render an analysis result to a Word (.docx) document on the backend and
+ * return the binary blob for client-side download.
+ */
+export async function downloadReportDocx(
+  result: AnalyzeResponse,
+  inputs: { narrative: string; product_code: string; event_type: string; manufacturer: string }
+): Promise<Blob> {
+  const res = await fetch(`${BASE_URL}/api/analyze/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...result, ...inputs }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.blob();
+}
+
 export async function processComplaint(data: {
   narrative: string;
   report_id?: string;
