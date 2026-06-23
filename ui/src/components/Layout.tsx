@@ -40,8 +40,8 @@ export default function Layout() {
             <Shield size={18} />
           </div>
           <div>
-            <div className={styles.title}>MedDevice Vigilance</div>
-            <div className={styles.subtitle}>FDA Signal Intelligence Platform</div>
+            <div className={styles.title}>Multi-Agent Quality Intelligence System</div>
+            <div className={styles.subtitle}>FDA MAUDE Signal Pipeline</div>
           </div>
         </div>
 
