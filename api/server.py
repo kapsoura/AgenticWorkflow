@@ -918,11 +918,26 @@ def analyze_complaint_endpoint(
             "rationale": "Risk analysis could not be completed.",
         }
 
+    # Which report types this complaint actually warrants, using the same routing
+    # rules as OrchestrationAgent.decide_report_types. The UI enables only these
+    # download buttons so users cannot request a report that was never generated.
+    risk_bucket = risk_block["bucket"]
+    escalation = bool(risk_block.get("escalation_required"))
+    recall_precedent = bool(recalls)
+    event = (complaint.event_type or "").strip().lower()
+    applicable_report_types = []
+    if event in {"injury", "death"} or escalation or risk_bucket == "UNACCEPTABLE":
+        applicable_report_types.append("INCIDENT_ASSESSMENT")
+    if risk_bucket in {"ALARP", "UNACCEPTABLE"} or escalation or recall_precedent:
+        applicable_report_types.append("CAPA")
+    applicable_report_types.append("PSUR")  # always appended
+
     total_ms = round((time.time() - t0) * 1000, 1)
 
     return {
         "report_id": report_id,
         "report_type": report_type,
+        "applicable_report_types": applicable_report_types,
         "risk_bucket": risk_block["bucket"],
         "risk": risk_block,
         "extraction": extraction_data,

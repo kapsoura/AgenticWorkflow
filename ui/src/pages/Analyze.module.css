@@ -249,6 +249,16 @@
   color: #4f46e5;
 }
 
+.downloadBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.downloadBtn:disabled:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
 .downloadRow {
   display: flex;
   flex-wrap: wrap;
