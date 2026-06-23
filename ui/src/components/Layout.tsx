@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchHealth } from '../api/client';
+import { AnalysisProvider } from '../context/AnalysisContext';
 import styles from './Layout.module.css';
 
 const NAV_ITEMS = [
@@ -69,7 +70,9 @@ export default function Layout() {
       </aside>
 
       <main className={styles.main}>
-        <Outlet />
+        <AnalysisProvider>
+          <Outlet />
+        </AnalysisProvider>
       </main>
     </div>
   );

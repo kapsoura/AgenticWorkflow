@@ -681,28 +681,7 @@ def analytics_trends(
         raise HTTPException(400, str(exc))
 
 
-# ─── Analyze helpers (retrieval / recalls / risk) ───────────────────────────
-
-# Map LLM severity hints to ISO 14971 risk buckets used across the UI.
-_SEVERITY_TO_BUCKET = {
-    "critical": "UNACCEPTABLE",
-    "high": "UNACCEPTABLE",
-    "severe": "UNACCEPTABLE",
-    "serious": "UNACCEPTABLE",
-    "medium": "ALARP",
-    "moderate": "ALARP",
-    "low": "ACCEPTABLE",
-    "minor": "ACCEPTABLE",
-    "none": "ACCEPTABLE",
-}
-_SEVERE_KEYWORDS = (
-    "death", "died", "fatal", "deceased", "life-threatening", "life threatening",
-    "permanent impairment", "permanent damage",
-)
-_MODERATE_KEYWORDS = (
-    "injury", "injured", "harm", "burn", "infection", "bleeding", "hemorrhage",
-    "hospitaliz", "surgery", "adverse", "overdose", "overexposure",
-)
+# ─── Analyze helpers (retrieval / recalls / report) ─────────────────────────
 
 
 def _enrich_similar_events(conn, similar_events: list, limit: int = 5) -> list:
@@ -751,48 +730,131 @@ def _related_recalls(conn, product_code: Optional[str], limit: int = 5) -> list:
     return out
 
 
-def _assess_risk(narrative: str, extraction_data: dict, cluster_data: dict, recalls: list):
+def _build_report_sections(
+    complaint,
+    extraction_data: dict,
+    risk_block: dict,
+    cluster_data: dict,
+    recalls: list,
+) -> list:
+    """Assemble a deterministic, downloadable report from the structured analysis.
+
+    No LLM is required — every section is rendered from data already produced by
+    the extraction / risk / retrieval steps, so a report is always available to
+    download regardless of which risk backend was used.
     """
-    Produce a risk bucket + human-readable signals.
+    def _fmt(value):
+        return value if value not in (None, "") else "—"
 
-    Prefers the LLM extraction severity when available; otherwise falls back to
-    a transparent heuristic over narrative keywords, cluster trend and recall
-    context so the report is still meaningful when the LLM is offline.
-    """
-    signals: list[str] = []
-    bucket: Optional[str] = None
-    used_llm = bool(extraction_data) and not extraction_data.get("error")
+    sections: list = []
 
-    sev = (extraction_data or {}).get("severity_indicator") if used_llm else None
-    if sev:
-        mapped = _SEVERITY_TO_BUCKET.get(str(sev).lower())
-        if mapped:
-            bucket = mapped
-            signals.append(f"LLM severity indicator: '{sev}'")
+    sections.append({
+        "name": "executive_summary",
+        "title": "1. Executive Summary",
+        "content": (
+            f"Report type: {risk_block.get('report_type') or 'PSUR'}\n"
+            f"Product code: {complaint.product_code}\n"
+            f"Event type: {complaint.event_type}\n"
+            f"Manufacturer: {complaint.manufacturer}\n"
+            f"Overall risk (ISO 14971): {risk_block.get('bucket')}\n"
+            f"Assessment method: "
+            f"{'LLM (Anthropic)' if risk_block.get('method') == 'anthropic' else 'Deterministic ISO 14971'}"
+        ),
+    })
 
-    text = (narrative or "").lower()
-    if any(k in text for k in _SEVERE_KEYWORDS):
-        signals.append("Narrative reports death or life-threatening outcome")
-        bucket = "UNACCEPTABLE"
-    elif bucket in (None, "ACCEPTABLE") and any(k in text for k in _MODERATE_KEYWORDS):
-        signals.append("Narrative reports patient injury or harm")
-        bucket = "ALARP"
+    if (
+        extraction_data
+        and not extraction_data.get("error")
+        and extraction_data.get("qms_complaint_category") not in (None, "NOT_AVAILABLE")
+    ):
+        flags = extraction_data.get("safety_flags") or {}
+        sections.append({
+            "name": "signal_extraction",
+            "title": "2. Signal Extraction",
+            "content": (
+                f"QMS category: {_fmt(extraction_data.get('qms_complaint_category'))}\n"
+                f"Key issues: {', '.join(extraction_data.get('key_issues') or []) or '—'}\n"
+                f"Confidence: {extraction_data.get('confidence')}\n"
+                f"Safety flags: {', '.join(k for k, v in flags.items() if v) or 'none'}\n"
+                f"ISO 13485 clauses: {', '.join(extraction_data.get('iso_13485_clauses') or []) or '—'}\n"
+                f"ISO 14971 hazard tags: {', '.join(extraction_data.get('iso_14971_hazard_tags') or []) or '—'}"
+            ),
+        })
+    else:
+        sections.append({
+            "name": "signal_extraction",
+            "title": "2. Signal Extraction",
+            "content": "Structured extraction not available (LLM client not configured).",
+        })
 
-    trend = (cluster_data or {}).get("trend_flag")
-    if trend in ("increasing", "emerging"):
-        signals.append(f"Cluster trend is '{trend}' (rising signal volume)")
-        if bucket in (None, "ACCEPTABLE"):
-            bucket = "ALARP"
+    sections.append({
+        "name": "risk_assessment",
+        "title": "3. Risk Assessment (ISO 14971)",
+        "content": (
+            f"Risk bucket: {risk_block.get('bucket')}\n"
+            f"Severity: {_fmt(risk_block.get('severity_level'))}\n"
+            f"Probability: {_fmt(risk_block.get('probability_level'))}\n"
+            f"Hazardous situation: {_fmt(risk_block.get('hazardous_situation'))}\n"
+            f"Harm: {_fmt(risk_block.get('harm'))}\n"
+            f"Escalation required: {risk_block.get('escalation_required', False)}\n"
+            f"PRRC notification: {risk_block.get('prrc_notification_required', False)}\n\n"
+            f"Rationale:\n{risk_block.get('rationale') or '—'}"
+        ),
+    })
+
+    if risk_block.get("capa_recommendation"):
+        sections.append({
+            "name": "capa",
+            "title": "4. CAPA Recommendation",
+            "content": str(risk_block.get("capa_recommendation")),
+        })
+
+    similar = cluster_data.get("similar_events") or []
+    if similar:
+        lines = []
+        for ev in similar:
+            score = ev.get("similarity_score")
+            pct = f"{score * 100:.1f}%" if isinstance(score, (int, float)) else "—"
+            meta = " · ".join(
+                str(x) for x in [ev.get("manufacturer"), ev.get("product_code"), ev.get("date_received")] if x
+            )
+            lines.append(
+                f"- {ev.get('report_number')} ({pct} match) {meta}\n  {ev.get('narrative_snippet') or ''}".rstrip()
+            )
+        sections.append({
+            "name": "retrieval_evidence",
+            "title": "5. Retrieved Similar Events",
+            "content": "\n".join(lines),
+        })
 
     if recalls:
-        signals.append(f"{len(recalls)} related FDA recall(s) for this product code")
-        if bucket in (None, "ACCEPTABLE"):
-            bucket = "ALARP"
+        lines = []
+        for rc in recalls:
+            lines.append(
+                f"- {rc.get('recall_number')} [{rc.get('classification') or '—'}] "
+                f"{rc.get('recalling_firm') or ''} {rc.get('recall_date') or ''}\n"
+                f"  {rc.get('reason_for_recall') or ''}".rstrip()
+            )
+        sections.append({
+            "name": "fda_recalls",
+            "title": "6. Related FDA Recalls (openFDA)",
+            "content": "\n".join(lines),
+        })
 
-    if bucket is None:
-        bucket = "ALARP" if signals else "ACCEPTABLE"
+    if cluster_data and not cluster_data.get("error"):
+        sections.append({
+            "name": "cluster_assignment",
+            "title": "7. Cluster Assignment",
+            "content": (
+                f"Cluster ID: {_fmt(cluster_data.get('cluster_id'))}\n"
+                f"Cluster label: {_fmt(cluster_data.get('cluster_label'))}\n"
+                f"Trend flag: {_fmt(cluster_data.get('trend_flag'))}\n"
+                f"Cluster size: {_fmt(cluster_data.get('cluster_size'))}\n"
+                f"30-day growth rate: {_fmt(cluster_data.get('growth_rate_30d'))}"
+            ),
+        })
 
-    return bucket, signals, ("llm" if used_llm else "heuristic")
+    return sections
 
 
 @app.post("/api/analyze")
@@ -854,8 +916,8 @@ def analyze_complaint_endpoint(
             "message": (
                 getattr(extraction_agent, "last_fallback_reason", None)
                 or "Anthropic LLM client not enabled (set CLAUDE_CLI_PATH or "
-                "ANTHROPIC_API_KEY in .env). Risk below uses a transparent "
-                "heuristic over retrieval, cluster trend and recall context."
+                "ANTHROPIC_API_KEY in .env). Risk below uses the deterministic "
+                "ISO 14971 estimate from the risk-analysis agent."
             ),
         }
 
@@ -910,7 +972,7 @@ def analyze_complaint_endpoint(
             },
         ))
 
-    # ── Risk assessment (Anthropic ISO 14971 agent, heuristic fallback) ──
+    # ── Risk assessment (Anthropic ISO 14971 agent; deterministic when offline) ──
     risk_agent = agents["risk"]
     assessment = None
     try:
@@ -920,13 +982,13 @@ def analyze_complaint_endpoint(
             extraction=extracted_signal,
             trend=None,
         )
-    except Exception:  # noqa: BLE001 — fall back to heuristic below
+    except Exception:  # noqa: BLE001
         assessment = None
 
     report_type = "PSUR"
-    if assessment is not None and assessment.llm_backed:
-        risk_bucket = assessment.risk_bucket
+    if assessment is not None:
         report_type = assessment.report_type or report_type
+        method = "anthropic" if assessment.llm_backed else "deterministic"
         risk_signals = [s for s in (
             f"Severity {assessment.severity_level} / probability {assessment.probability_level}",
             f"Hazardous situation: {assessment.hazardous_situation}" if assessment.hazardous_situation else "",
@@ -935,8 +997,9 @@ def analyze_complaint_endpoint(
             f"{len(recalls)} related FDA recall(s)" if recalls else "",
         ) if s]
         risk_block = {
-            "bucket": risk_bucket,
-            "method": "anthropic",
+            "bucket": assessment.risk_bucket,
+            "method": method,
+            "report_type": report_type,
             "signals": risk_signals,
             "rationale": assessment.iso_14971_rationale
             or "ISO 14971 assessment produced by the risk-analysis agent.",
@@ -949,17 +1012,17 @@ def analyze_complaint_endpoint(
             "harm": assessment.harm,
         }
     else:
-        # LLM risk unavailable → transparent heuristic over narrative/cluster/recalls.
-        risk_bucket, heur_signals, _ = _assess_risk(
-            narrative, extraction_data, cluster_data, recalls
-        )
         risk_block = {
-            "bucket": risk_bucket,
-            "method": "heuristic",
-            "signals": heur_signals,
-            "rationale": "; ".join(heur_signals) if heur_signals
-            else "No elevated-risk signals detected from narrative, cluster trend or recalls.",
+            "bucket": "UNKNOWN",
+            "method": "unavailable",
+            "report_type": report_type,
+            "signals": [],
+            "rationale": "Risk analysis could not be completed.",
         }
+
+    sections = _build_report_sections(
+        complaint, extraction_data, risk_block, cluster_data, recalls
+    )
 
     total_ms = round((time.time() - t0) * 1000, 1)
 
@@ -972,7 +1035,7 @@ def analyze_complaint_endpoint(
         "extraction_status": extraction_status,
         "evidence_count": len(cluster_data.get("similar_events", [])),
         "recalls": recalls,
-        "sections": [],
+        "sections": sections,
         "validation": {"passed": True, "issues": []},
         "cluster": cluster_data,
         "total_duration_ms": total_ms,

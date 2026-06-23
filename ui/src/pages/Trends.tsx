@@ -5,6 +5,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { fetchTrends, fetchMeta } from '../api/client';
+import { useAnalysis } from '../context/AnalysisContext';
 import Spinner from '../components/Spinner';
 import styles from './Trends.module.css';
 
@@ -26,6 +27,16 @@ export default function Trends() {
   const [dimension, setDimension] = useState('product_code');
   const [productCode, setProductCode] = useState('');
   const [eventType, setEventType] = useState('');
+
+  const { result } = useAnalysis();
+  const cluster = result?.cluster;
+  const similarEvents = cluster?.similar_events ?? [];
+  const clusterChartData = similarEvents.map((ev) => ({
+    name: ev.report_number,
+    similarity: typeof ev.similarity_score === 'number'
+      ? Number((ev.similarity_score * 100).toFixed(1))
+      : 0,
+  }));
 
   const { data: meta } = useQuery({
     queryKey: ['meta'],
@@ -57,6 +68,65 @@ export default function Trends() {
           Explore adverse event distributions and temporal trends
         </p>
       </div>
+
+      {result && cluster && (
+        <div className={styles.clusterPanel}>
+          <div className={styles.clusterHead}>
+            <h2>Signal Trend — Analyzed Complaint</h2>
+            <span className={styles.reportId}>{result.report_id}</span>
+          </div>
+
+          <div className={styles.clusterMeta}>
+            <div className={styles.metaCard}>
+              <span className={styles.metaLabel}>Cluster ID</span>
+              <strong>{cluster.cluster_id ?? '—'}</strong>
+            </div>
+            <div className={styles.metaCard}>
+              <span className={styles.metaLabel}>Cluster Label</span>
+              <strong>{cluster.cluster_label ?? '—'}</strong>
+            </div>
+            <div className={styles.metaCard}>
+              <span className={styles.metaLabel}>Trend Flag</span>
+              <strong>{cluster.trend_flag ?? '—'}</strong>
+            </div>
+            <div className={styles.metaCard}>
+              <span className={styles.metaLabel}>Cluster Size</span>
+              <strong>{cluster.cluster_size ?? '—'}</strong>
+            </div>
+            <div className={styles.metaCard}>
+              <span className={styles.metaLabel}>30-day Growth</span>
+              <strong>{cluster.growth_rate_30d ?? '—'}</strong>
+            </div>
+          </div>
+
+          {clusterChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={clusterChartData} margin={{ top: 10, right: 30, bottom: 60, left: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis
+                  dataKey="name"
+                  stroke="#64748b"
+                  fontSize={11}
+                  angle={-35}
+                  textAnchor="end"
+                  height={80}
+                />
+                <YAxis stroke="#64748b" fontSize={12} domain={[0, 100]} unit="%" />
+                <Tooltip
+                  contentStyle={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                  labelStyle={{ color: '#1e293b', fontWeight: 600 }}
+                  formatter={(v) => [`${v}%`, 'Similarity']}
+                />
+                <Bar dataKey="similarity" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className={styles.empty}>
+              No similar events were retrieved for this complaint.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className={styles.controls}>
         <label className={styles.control}>

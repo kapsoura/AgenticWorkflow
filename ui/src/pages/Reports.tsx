@@ -95,8 +95,8 @@ export default function Reports() {
       <div className={styles.downloadNote}>
         <Download size={16} />
         <span>
-          To download generated reports, use the <strong>Analyze</strong> page
-          and click "Generate & Download DOCX"
+          To download a generated report, use the <strong>Analyze</strong> page
+          and click <strong>Download</strong> to save a Markdown report.
         </span>
       </div>
     </div>

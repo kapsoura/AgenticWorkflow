@@ -1,8 +1,9 @@
-import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Send, AlertTriangle, CheckCircle, FileText, Download } from 'lucide-react';
 import { analyzeComplaint, fetchMeta } from '../api/client';
 import type { AnalyzeResponse } from '../api/client';
+import { useAnalysis } from '../context/AnalysisContext';
+import { buildReportMarkdown } from '../utils/report';
 import Spinner from '../components/Spinner';
 import styles from './Analyze.module.css';
 
@@ -34,11 +35,8 @@ const SAMPLE_NARRATIVES = [
 ];
 
 export default function Analyze() {
-  const [narrative, setNarrative] = useState('');
-  const [productCode, setProductCode] = useState('LNH');
-  const [eventType, setEventType] = useState('Malfunction');
-  const [manufacturer, setManufacturer] = useState('');
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const { inputs, setInputs, result, setResult } = useAnalysis();
+  const { narrative, productCode, eventType, manufacturer } = inputs;
 
   const { data: meta } = useQuery({
     queryKey: ['meta'],
@@ -47,7 +45,7 @@ export default function Analyze() {
 
   const analyzeMutation = useMutation({
     mutationFn: analyzeComplaint,
-    onSuccess: (data) => setResult(data),
+    onSuccess: (data: AnalyzeResponse) => setResult(data),
   });
 
   const handleAnalyze = () => {
@@ -62,22 +60,23 @@ export default function Analyze() {
 
   const loadSample = (idx: number) => {
     const s = SAMPLE_NARRATIVES[idx];
-    setNarrative(s.narrative);
-    setProductCode(s.product_code);
-    setEventType(s.event_type);
-    setManufacturer(s.manufacturer);
+    setInputs({
+      narrative: s.narrative,
+      productCode: s.product_code,
+      eventType: s.event_type,
+      manufacturer: s.manufacturer,
+    });
     setResult(null);
   };
 
   const handleDownload = () => {
     if (!result) return;
-    const blob = new Blob([JSON.stringify(result, null, 2)], {
-      type: 'application/json',
-    });
+    const markdown = buildReportMarkdown(result, inputs);
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${result.report_id || 'analysis'}.json`;
+    a.download = `${result.report_id || 'analysis'}.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -113,7 +112,7 @@ export default function Analyze() {
               className={styles.textarea}
               placeholder="Enter the adverse event description..."
               value={narrative}
-              onChange={(e) => setNarrative(e.target.value)}
+              onChange={(e) => setInputs({ ...inputs, narrative: e.target.value })}
               rows={8}
             />
           </label>
@@ -124,7 +123,7 @@ export default function Analyze() {
               <select
                 className={styles.select}
                 value={productCode}
-                onChange={(e) => setProductCode(e.target.value)}
+                onChange={(e) => setInputs({ ...inputs, productCode: e.target.value })}
               >
                 {(meta?.product_codes || ['LNH', 'JAK', 'LLZ']).map((code) => (
                   <option key={code} value={code}>
@@ -139,7 +138,7 @@ export default function Analyze() {
               <select
                 className={styles.select}
                 value={eventType}
-                onChange={(e) => setEventType(e.target.value)}
+                onChange={(e) => setInputs({ ...inputs, eventType: e.target.value })}
               >
                 {(meta?.event_types || ['Malfunction', 'Injury', 'Death']).map((t) => (
                   <option key={t} value={t}>
@@ -156,7 +155,7 @@ export default function Analyze() {
                 type="text"
                 placeholder="e.g. Siemens"
                 value={manufacturer}
-                onChange={(e) => setManufacturer(e.target.value)}
+                onChange={(e) => setInputs({ ...inputs, manufacturer: e.target.value })}
               />
             </label>
           </div>
@@ -250,7 +249,11 @@ export default function Analyze() {
                   <h4>
                     Risk Analysis
                     <span className={styles.riskMethod}>
-                      {result.risk.method === 'llm' ? 'LLM severity' : 'heuristic'}
+                      {result.risk.method === 'anthropic'
+                        ? 'LLM (Anthropic)'
+                        : result.risk.method === 'deterministic'
+                        ? 'Deterministic ISO 14971'
+                        : 'Unavailable'}
                     </span>
                   </h4>
                   <p className={styles.riskRationale}>{result.risk.rationale}</p>

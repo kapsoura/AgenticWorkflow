@@ -56,6 +56,65 @@
   box-shadow: var(--shadow);
 }
 
+.clusterPanel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid #0ea5e9;
+  border-radius: var(--radius);
+  padding: 1.4rem;
+  margin-bottom: 1.4rem;
+  box-shadow: var(--shadow);
+}
+
+.clusterHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.clusterHead h2 {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.reportId {
+  font-family: var(--mono, monospace);
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: var(--panel-2);
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.clusterMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin-bottom: 1.2rem;
+}
+
+.metaCard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 110px;
+}
+
+.metaLabel {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+
 .loading,
 .empty {
   display: flex;

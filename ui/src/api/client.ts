@@ -66,9 +66,17 @@ export interface AnalyzeResponse {
   risk_bucket: string;
   risk?: {
     bucket: string;
-    method: 'llm' | 'heuristic';
+    method: 'anthropic' | 'deterministic' | 'unavailable';
+    report_type?: string;
     signals: string[];
     rationale: string;
+    severity_level?: string | null;
+    probability_level?: string | null;
+    escalation_required?: boolean;
+    prrc_notification_required?: boolean;
+    capa_recommendation?: string | null;
+    hazardous_situation?: string | null;
+    harm?: string | null;
   };
   extraction: Record<string, unknown>;
   extraction_status?: { ok: boolean; reason?: string; message?: string };
@@ -76,7 +84,14 @@ export interface AnalyzeResponse {
   recalls?: RecallEvidence[];
   sections: { name: string; title: string; content: string }[];
   validation: { passed: boolean; issues: string[] };
-  cluster?: Record<string, unknown> & { similar_events?: SimilarEvent[] };
+  cluster?: Record<string, unknown> & {
+    similar_events?: SimilarEvent[];
+    cluster_id?: number | string | null;
+    cluster_label?: string | null;
+    trend_flag?: string | null;
+    cluster_size?: number | null;
+    growth_rate_30d?: number | null;
+  };
   total_duration_ms?: number;
 }
 
