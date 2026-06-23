@@ -249,6 +249,17 @@
   color: #4f46e5;
 }
 
+.downloadRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.downloadRow .downloadBtn {
+  margin-left: 0;
+}
+
 .badges {
   display: flex;
   gap: 0.4rem;

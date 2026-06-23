@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Send, AlertTriangle, CheckCircle, FileText, Download } from 'lucide-react';
-import { analyzeComplaint, downloadReportsZip, fetchMeta } from '../api/client';
+import { analyzeComplaint, downloadReportDocx, downloadReportsZip, fetchMeta } from '../api/client';
 import type { AnalyzeResponse } from '../api/client';
 import { useAnalysis } from '../context/AnalysisContext';
 import { buildReportMarkdown } from '../utils/report';
@@ -94,6 +94,28 @@ export default function Analyze() {
       // Fall back to a client-side Markdown report if the backend is offline.
       const markdown = buildReportMarkdown(result, inputs);
       triggerDownload(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }), 'md');
+    }
+  };
+
+  const handleDownloadOne = async (reportType: string) => {
+    if (!result) return;
+    const baseName = result.report_id || 'analysis';
+    const inputsPayload = {
+      narrative,
+      product_code: productCode,
+      event_type: eventType,
+      manufacturer: manufacturer || 'Unknown',
+    };
+    try {
+      const blob = await downloadReportDocx(result, inputsPayload, reportType);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}_${reportType}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Could not generate ${reportType} report: ${(err as Error).message}`);
     }
   };
 
@@ -227,6 +249,23 @@ export default function Analyze() {
                   <Download size={14} />
                   Download Reports (ZIP)
                 </button>
+              </div>
+
+              <div className={styles.downloadRow}>
+                {[
+                  { type: 'PSUR', label: 'PSUR' },
+                  { type: 'INCIDENT_ASSESSMENT', label: 'Incident Assessment' },
+                  { type: 'CAPA', label: 'CAPA' },
+                ].map((r) => (
+                  <button
+                    key={r.type}
+                    className={styles.downloadBtn}
+                    onClick={() => handleDownloadOne(r.type)}
+                  >
+                    <Download size={14} />
+                    {r.label}
+                  </button>
+                ))}
               </div>
 
               <div className={styles.badges}>

@@ -163,14 +163,18 @@ export async function analyzeComplaint(data: {
 }
 
 /**
- * Render an analysis result to a Word (.docx) document on the backend and
- * return the binary blob for client-side download.
+ * Render a single agent-authored report to a Word (.docx) document on the
+ * backend and return the binary blob for client-side download. Pass
+ * ``reportType`` (PSUR / INCIDENT_ASSESSMENT / CAPA) to choose which report the
+ * ReportGenerationAgent authors; omit it for the analysis's routed type.
  */
 export async function downloadReportDocx(
   result: AnalyzeResponse,
-  inputs: { narrative: string; product_code: string; event_type: string; manufacturer: string }
+  inputs: { narrative: string; product_code: string; event_type: string; manufacturer: string },
+  reportType?: string
 ): Promise<Blob> {
-  const res = await fetch(`${BASE_URL}/api/analyze/report`, {
+  const query = reportType ? `?report_type=${encodeURIComponent(reportType)}` : '';
+  const res = await fetch(`${BASE_URL}/api/analyze/report${query}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...result, ...inputs }),
