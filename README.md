@@ -4,6 +4,20 @@ A multi-agent AI system for medical device signal intelligence. Given a raw FDA 
 
 **IISc Bangalore · Deep Learning (DA225o) · June 2026**
 
+
+---
+
+## Team
+
+|  Members |
+|---|
+|  Mohammad Ayan Khan |
+| Pothukanuri Sai Venkat |
+|  Kashinath Alias Kapil Subhash Naik  |
+|  Pranav N |
+| Ritesh Patil |
+| Anish Vijaykumar |
+
 ---
 
 ## Pipeline Overview
@@ -301,12 +315,3 @@ AgenticWorkflow/
 - **ISO 14971 risk matrix**: Risk is bucketed into ACCEPTABLE / ALARP / UNACCEPTABLE using severity × probability, with LLM-backed rationale surfaced in the report.
 
 ---
-
-## Team
-
-| Agent | Owner |
-|---|---|
-| Agent 1 — Data Extraction + Trend | Mohammad Ayan Khan |
-| Agent 3 — FDA Evidence Retrieval | Pothukanuri Sai Venkat |
-| Agent 2/4 — Risk + Report Generation + Orchestration | Kapil |
-| Integration + Merger | Pranav N |
