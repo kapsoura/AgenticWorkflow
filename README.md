@@ -7,6 +7,10 @@ A multi-agent AI system for medical device signal intelligence. Given a raw FDA 
 
 ---
 
+### Deployed App Link : https://multi-agent-quality-intellience-ui.vercel.app/dashboard
+
+--- 
+
 ## Team
 
 |  Members |
