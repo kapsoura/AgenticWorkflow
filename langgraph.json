@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "signal_intelligence": "./src/pipeline/studio_graph.py:make_graph"
+  },
+  "env": ".env"
+}
