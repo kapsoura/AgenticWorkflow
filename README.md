@@ -204,7 +204,6 @@ before sign-off. This is the evaluator-optimizer loop working as designed.
 ### Full pipeline via FastAPI (all 4 agents, web UI)
 
 ```bash
-cd Project
 uvicorn src.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
