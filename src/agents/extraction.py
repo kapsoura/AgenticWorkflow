@@ -100,7 +100,13 @@ class ExtractionAgent:
         try:
             signal = self._extract_llm(complaint)
             self.last_backend = "anthropic"
-            self.last_fallback_reason = None
+            # Only clear the reason on a genuine success. _extract_llm may return
+            # NOT_AVAILABLE *without raising* (e.g. the model came back empty); in
+            # that case it already set an accurate last_fallback_reason, so don't
+            # overwrite it — otherwise the server falls back to its misleading
+            # "LLM client not enabled" default even though the client is enabled.
+            if signal.qms_complaint_category != "NOT_AVAILABLE":
+                self.last_fallback_reason = None
             return signal
         except Exception as exc:  # noqa: BLE001 — surface the reason via the trace
             self.last_backend = "unavailable"

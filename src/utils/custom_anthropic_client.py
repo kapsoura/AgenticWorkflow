@@ -37,7 +37,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # How long to wait for a single CLI round-trip before giving up.
-_CLI_TIMEOUT_SECONDS = 120
+_CLI_TIMEOUT_SECONDS = 12000
 
 
 # ── Duck-typed response objects ───────────────────────────────────────────────

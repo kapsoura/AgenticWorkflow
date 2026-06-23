@@ -92,7 +92,11 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """Get a SQLite connection with row factory enabled."""
     path = db_path or DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    # check_same_thread=False: the API server (FastAPI) holds one shared
+    # pipeline.conn that is reused across anyio threadpool worker threads.
+    # Access is read-heavy and WAL is enabled, so relaxing the thread guard
+    # is safe here. (Per-request endpoints still open+close their own conn.)
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
