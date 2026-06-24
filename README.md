@@ -4,6 +4,7 @@ A multi-agent AI system for medical device signal intelligence. Given a raw FDA 
 
 **IISc Bangalore · Deep Learning (DA225o) · June 2026**
 
+**Live Demo:** [https://multi-agent-quality-intellience-ui.vercel.app/dashboard](https://multi-agent-quality-intellience-ui.vercel.app/dashboard)
 
 ---
 
