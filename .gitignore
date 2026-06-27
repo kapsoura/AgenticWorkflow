@@ -56,3 +56,22 @@ Project/*
 # Claude
 CLAUDE.md
 outputs/runtime/
+ui/.vite/deps/_metadata.json
+ui/.vite/deps/@tanstack_react-query.js
+ui/.vite/deps/@tanstack_react-query.js.map
+ui/.vite/deps/lucide-react.js
+ui/.vite/deps/lucide-react.js.map
+ui/.vite/deps/package.json
+ui/.vite/deps/react_jsx-dev-runtime.js
+ui/.vite/deps/react_jsx-dev-runtime.js.map
+ui/.vite/deps/react-CZunmVaX.js
+ui/.vite/deps/react-CZunmVaX.js.map
+ui/.vite/deps/react-dom_client.js
+ui/.vite/deps/react-dom_client.js.map
+ui/.vite/deps/react-dom-DlAeUGhR.js
+ui/.vite/deps/react-dom-DlAeUGhR.js.map
+ui/.vite/deps/react-router-dom.js
+ui/.vite/deps/react-router-dom.js.map
+ui/.vite/deps/react.js
+ui/.vite/deps/recharts.js
+ui/.vite/deps/recharts.js.map
